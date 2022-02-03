@@ -1,0 +1,15 @@
+CMakeFiles/
+CMakeCache.txt
+Makefile
+build/
+dist/
+_build/
+_deps/
+_generate/
+cmake_install.cmake
+*.so
+*.py[cod]
+*.egg-info
+*env*
+*.swp
+tuberd
