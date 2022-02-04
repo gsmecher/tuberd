@@ -11,6 +11,7 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++20")
 # Allow e.g. libhttpserver to be installed somewhere unexpected
 list(APPEND CMAKE_MODULE_PATH "/usr/local/share/cmake/Modules")
 
+find_package(Python COMPONENTS Interpreter Development)
 find_package(Boost REQUIRED program_options)
 find_package(fmt REQUIRED)
 find_package(LibHttpServer MODULE REQUIRED)
