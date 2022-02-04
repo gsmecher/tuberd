@@ -133,37 +133,39 @@ class Context(tworoutine.tworoutine):
             calls.append(c)
             futures.append(f)
 
-        if calls:
+        # An empty Context returns an empty list of calls
+        if not calls:
+            return []
 
-            loop = asyncio.get_running_loop()
-            try:
-                cs = _clientsession[loop]
-            except KeyError as e:
-                _clientsession[loop] = cs = aiohttp.ClientSession(
-                    json_serialize=simplejson.dumps
-                )
+        loop = asyncio.get_running_loop()
+        try:
+            cs = _clientsession[loop]
+        except KeyError as e:
+            _clientsession[loop] = cs = aiohttp.ClientSession(
+                json_serialize=simplejson.dumps
+            )
 
-            # Create a HTTP request to complete the call. This is a coroutine,
-            # so we queue the call and then suspend execution (via 'yield')
-            # until it's complete.
-            try:
-                async with cs.post(self.obj.tuber_uri, json=calls) as resp:
-                    json_out = await resp.json(loads=_json_loads, content_type=None)
+        # Create a HTTP request to complete the call. This is a coroutine,
+        # so we queue the call and then suspend execution (via 'yield')
+        # until it's complete.
+        try:
+            async with cs.post(self.obj.tuber_uri, json=calls) as resp:
+                json_out = await resp.json(loads=_json_loads, content_type=None)
 
-            except aiohttp.ClientConnectorError as e:
-                raise TuberNetworkError(e)
+        except aiohttp.ClientConnectorError as e:
+            raise TuberNetworkError(e)
 
-            # Resolve futures
-            results = []
-            for (f, r) in zip(futures, json_out):
-                if hasattr(r, "error") and r.error:
-                    f.set_exception(TuberRemoteError(r.error.message))
-                else:
-                    results.append(r.result)
-                    f.set_result(r.result)
+        # Resolve futures
+        results = []
+        for (f, r) in zip(futures, json_out):
+            if hasattr(r, "error") and r.error:
+                f.set_exception(TuberRemoteError(r.error.message))
+            else:
+                results.append(r.result)
+                f.set_result(r.result)
 
-            # Return a list of results
-            return results
+        # Return a list of results
+        return results
 
     def __getattr__(self, name):
         if attribute_blacklisted(name):
