@@ -294,11 +294,11 @@ int main(int argc, char **argv) {
 		 "port")
 
 		("preamble",
-		 po::value<std::string>(&preamble)->default_value("/usr/lib/tuberd/preamble.py"),
+		 po::value<std::string>(&preamble)->default_value("/usr/share/tuberd/preamble.py"),
 		 "location of slow-path Python code")
 
 		("registry",
-		 po::value<std::string>(&registry)->default_value("/usr/lib/tuberd/registry.py"),
+		 po::value<std::string>(&registry)->default_value("/usr/share/tuberd/registry.py"),
 		 "location of registry Python code")
 
 		("webroot,w",
@@ -353,11 +353,15 @@ int main(int argc, char **argv) {
 	tr.set_allowing("POST", true);
 	ws.register_resource("/tuber", &tr);
 
-	/* Use default enpoint for file handling */
-	file_resource fr(fs::canonical(webroot));
-	fr.disallow_all();
-	fr.set_allowing("GET", true);
-	ws.register_resource("/", &fr, true);
+	/* If a valid webroot was provided, serve static content for other paths. */
+        try {
+	        file_resource fr(fs::canonical(webroot));
+	        fr.disallow_all();
+	        fr.set_allowing("GET", true);
+	        ws.register_resource("/", &fr, true);
+        } catch(fs::filesystem_error &e) {
+                fmt::print(stderr, "Unable to resolve webroot {}; not serving static content.\n", webroot);
+        }
 
 	/* Go! */
 	ws.start(true);
