@@ -54,11 +54,6 @@ def describe(registry, request):
             return {'result': attr}
 
         # Complex case: return a description of a method
-        doc = inspect.getdoc(attr)
-        sig = str(inspect.signature(attr))
-
         return {
-            'result': {
-                '__doc__': f'{objname}.{propertyname}{sig}\n\n{doc}'
-            }
+            'result': { '__doc__': inspect.getdoc(attr) }
         }
