@@ -29,7 +29,9 @@ def describe(registry, request):
         properties = []
 
         for c in dir(obj):
-            if c[0] == '_':
+            # Don't export dunder methods or attributes - this avoids exporting
+            # Python internals on the server side to any client.
+            if c.startswith('__'):
                 continue
 
             if callable(getattr(obj, c)):
