@@ -63,20 +63,33 @@ std::istream& operator>>(std::istream& in, Verbose& v) {
 
 /* MIME types */
 static const std::string MIME_JSON="application/json";
+static const std::string MIME_DEFAULT="text/plain";
+
 static const std::map<std::string, std::string> MIME_TYPES = {
-	{".css",  "text/css"},
-	{".gif",  "image/gif"},
-	{".htm",  "text/html"},
-	{".html", "text/html"},
-	{".jpeg", "image/jpeg"},
-	{".jpg",  "image/jpeg"},
-	{".js",   "application/javascript"},
-	{".json", MIME_JSON},
-	{".pdf",  "application/pdf"},
-	{".png",  "image/png"},
-	{".svg",  "image/svg+xml"},
-	{".ttf",  "application/font-sfnt"},
-	{".woff", "application/font-woff"},
+	/* web content */
+	{".css",   "text/css"},
+	{".htm",   "text/html"},
+	{".html",  "text/html"},
+	{".js",    "text/javascript"},
+	{".json",  MIME_JSON},
+	/* No entry for .txt needed - it's the fallback case */
+
+	/* fonts */
+	{".eot",   "application/vnd.ms-fontobject"},
+	{".ttf",   "font/ttf"},
+	{".woff",  "font/woff"},
+	{".woff2", "font/woff2"},
+
+	/* images */
+	{".gif",   "image/gif"},
+	{".ico",   "image/vnd.microsoft.icon"},
+	{".jpeg",  "image/jpeg"},
+	{".jpg",   "image/jpeg"},
+	{".png",   "image/png"},
+	{".svg",   "image/svg+xml"},
+
+	/* application specific */
+	{".pdf",   "application/pdf"},
 };
 
 static json error_response(std::string const& msg) {
@@ -249,14 +262,10 @@ class DLL_LOCAL file_resource : public http_resource {
 			}
 
 			/* Figure out a MIME type to use */
-			std::string mime_type;
-			try {
-				mime_type = MIME_TYPES.at(path.extension().string());
-			} catch(std::out_of_range &e) {
-				if(verbose >= Verbose::UNEXPECTED)
-					fmt::print(stderr, "Unable to determine MIME type for extension {}\n", path.extension().string());
-				mime_type = "text/plain";
-			}
+			std::string mime_type = MIME_DEFAULT;
+			auto it = MIME_TYPES.find(path.extension().string());
+			if(it != MIME_TYPES.end())
+				mime_type = it->second;
 
 			if(verbose >= Verbose::NOISY)
 				fmt::print(stderr, "Serving {} with {} using MIME type {}\n", req.get_path(), path.string(), mime_type);
@@ -271,10 +280,10 @@ class DLL_LOCAL file_resource : public http_resource {
 };
 
 /* Unfortunately, we need to carry around a global pointer just for signal handling. */
-static webserver *ws_ref = NULL;
+static std::unique_ptr<webserver> ws = nullptr;
 static void sigint(int signo) {
-	if(ws_ref)
-		ws_ref->stop();
+	if(ws)
+		ws->stop();
 }
 
 int main(int argc, char **argv) {
@@ -341,30 +350,34 @@ int main(int argc, char **argv) {
 	 * Start webserver
 	 */
 
-	webserver ws = create_webserver(port)
-		.start_method(http::http_utils::THREAD_PER_CONNECTION)
-		;
-	ws_ref = &ws;
+	std::unique_ptr<http_resource> fr = nullptr;
+	std::unique_ptr<http_resource> tr = nullptr;
+	ws = std::make_unique<webserver>(create_webserver(port).start_method(http::http_utils::THREAD_PER_CONNECTION));
+
 	std::signal(SIGINT, &sigint);
 
 	/* Set up /tuber endpoint */
-	tuber_resource tr(reg);
-	tr.disallow_all();
-	tr.set_allowing("POST", true);
-	ws.register_resource("/tuber", &tr);
+	tr = std::make_unique<tuber_resource>(reg);
+	tr->disallow_all();
+	tr->set_allowing(MHD_HTTP_METHOD_POST, true);
+	ws->register_resource("/tuber", tr.get());
 
 	/* If a valid webroot was provided, serve static content for other paths. */
-        try {
-	        file_resource fr(fs::canonical(webroot));
-	        fr.disallow_all();
-	        fr.set_allowing("GET", true);
-	        ws.register_resource("/", &fr, true);
-        } catch(fs::filesystem_error &e) {
-                fmt::print(stderr, "Unable to resolve webroot {}; not serving static content.\n", webroot);
-        }
+	try {
+		fr = std::make_unique<file_resource>(fs::canonical(webroot));
+		fr->disallow_all();
+		fr->set_allowing(MHD_HTTP_METHOD_GET, true);
+		ws->register_resource("/", fr.get(), true);
+	} catch(fs::filesystem_error &e) {
+		fmt::print(stderr, "Unable to resolve webroot {}; not serving static content.\n", webroot);
+	}
 
 	/* Go! */
-	ws.start(true);
-    
+	try {
+		ws->start(true);
+	} catch(std::exception &e) {
+		fmt::print("Error: {}", e.what());
+	}
+
 	return 0;
 }
