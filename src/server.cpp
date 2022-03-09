@@ -234,7 +234,7 @@ class DLL_LOCAL tuber_resource : public http_resource {
  */
 class DLL_LOCAL file_resource : public http_resource {
 	public:
-		file_resource(fs::path webroot) : webroot(webroot) {};
+		file_resource(fs::path webroot, int max_age) : webroot(webroot), max_age(max_age) {};
 
 		const std::shared_ptr<http_response> render_GET(const http_request& req) {
 			/* Start with webroot and append path segments from
@@ -272,11 +272,12 @@ class DLL_LOCAL file_resource : public http_resource {
 
 			/* Construct response and return it */
 			auto response = std::shared_ptr<file_response>(new file_response(path.string(), http::http_utils::http_ok, mime_type));
-			response->with_header(http::http_utils::http_header_cache_control, "max-age=3600"); /* Encourage caching */
+			response->with_header(http::http_utils::http_header_cache_control, fmt::format("max-age={}", max_age));
 			return response;
 		}
 	private:
 		fs::path webroot;
+		int max_age;
 };
 
 /* Unfortunately, we need to carry around a global pointer just for signal handling. */
@@ -292,11 +293,16 @@ int main(int argc, char **argv) {
 	 */
 
 	int port;
+	int max_age;
 	std::string preamble, registry, webroot;
 
 	po::options_description desc("tuberd");
 	desc.add_options()
 		("help,h", "produce help message")
+
+		("max-age",
+		 po::value<int>(&max_age)->default_value(3600),
+		 "maximum cache residency for static (file) assets")
 
 		("port,p",
 		 po::value<int>(&port)->default_value(80),
@@ -364,7 +370,7 @@ int main(int argc, char **argv) {
 
 	/* If a valid webroot was provided, serve static content for other paths. */
 	try {
-		fr = std::make_unique<file_resource>(fs::canonical(webroot));
+		fr = std::make_unique<file_resource>(fs::canonical(webroot), max_age);
 		fr->disallow_all();
 		fr->set_allowing(MHD_HTTP_METHOD_GET, true);
 		ws->register_resource("/", fr.get(), true);
