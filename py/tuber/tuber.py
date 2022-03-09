@@ -2,19 +2,58 @@
 Tuber object interface
 """
 
-import socket
-import urllib
 import asyncio
-import aiohttp
 import atexit
+import contextlib
+import socket
 import textwrap
+import urllib
 import warnings
 import weakref
 
-from . import tworoutine
+# Prefer SimpleJSON, but fall back on built-in
+try:
+    import simplejson as json
+except ModuleNotFoundError:
+    import json
 
-# Simplejson is now mandatory (it's faster enough to insist)
-import simplejson
+try:
+    # Are we in a normal Python environment? This is the happy path.
+    from aiohttp import ClientSession, ClientConnectorError
+except ModuleNotFoundError:
+    # Otherwise, we're probably in a JupyterLite environment.  The aiohttp
+    # libraries aren't supported and we provide a crude hand-drawn facsimile.
+    import pyodide
+
+    class ClientConnectorError(Exception):
+        pass
+
+    class ResultStub:
+        def __init__(self, response):
+            self._response = response
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            pass
+
+        async def json(self, loads, *args, **kwargs):
+            response = await self._response
+            result = await response.string()
+            return loads(result)
+
+    class ClientSession:
+        def __init__(self, json_serialize):
+            self._dumps = json_serialize
+
+        def post(self, uri, json):
+            return ResultStub(
+                pyodide.http.pyfetch(uri, method="POST", body=self._dumps(json))
+            )
+
+
+from . import tworoutine
 
 # Keep a mapping between event loops and client session objects, so we can
 # reuse clientsessions in an event-loop safe way. This is a slightly cheeky
@@ -60,7 +99,7 @@ class TuberResult:
         return repr(self.__dict__)
 
 
-_json_loads = simplejson.JSONDecoder(object_hook=TuberResult).decode
+_json_loads = json.JSONDecoder(object_hook=TuberResult).decode
 
 
 def attribute_blacklisted(name):
@@ -141,9 +180,7 @@ class Context(tworoutine.tworoutine):
         try:
             cs = _clientsession[loop]
         except KeyError as e:
-            _clientsession[loop] = cs = aiohttp.ClientSession(
-                json_serialize=simplejson.dumps
-            )
+            _clientsession[loop] = cs = ClientSession(json_serialize=json.dumps)
 
         # Create a HTTP request to complete the call. This is a coroutine,
         # so we queue the call and then suspend execution (via 'yield')
@@ -152,7 +189,7 @@ class Context(tworoutine.tworoutine):
             async with cs.post(self.obj.tuber_uri, json=calls) as resp:
                 json_out = await resp.json(loads=_json_loads, content_type=None)
 
-        except aiohttp.ClientConnectorError as e:
+        except ClientConnectorError as e:
             raise TuberNetworkError(e)
 
         # Resolve futures
@@ -297,7 +334,7 @@ class TuberObject:
         except KeyError as e:
             raise TuberStateError(
                 e,
-                "Attempt to retrieve metadata on TuberObject that doesn't have it yet! Did you forget to call resolve()?",
+                "No metadata! Did you forget to call tuber_resolve()?",
             )
 
         if name not in meta.methods and name not in meta.properties:
@@ -316,7 +353,11 @@ class TuberObject:
                     result = getattr(ctx, name)(*args, **kwargs)
                 return result.result()
 
-            invoke.__acall__.__doc__ = textwrap.dedent(metam[name].__doc__)
+            # Attach DocStrings, if provided and valid
+            try:
+                invoke.__acall__.__doc__ = textwrap.dedent(metam[name].__doc__)
+            except:
+                pass
 
             # Associate as a class method.
             setattr(self.__class__, name, invoke)
