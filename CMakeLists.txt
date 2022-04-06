@@ -16,10 +16,13 @@ find_package(Boost REQUIRED program_options)
 find_package(fmt REQUIRED)
 find_package(LibHttpServer MODULE REQUIRED)
 find_package(pybind11 REQUIRED)
-find_package(pybind11_json REQUIRED)
+
+include(CTest)
 
 add_executable(tuberd src/server.cpp)
 target_link_libraries(tuberd PRIVATE boost_program_options fmt::fmt httpserver pybind11::embed)
+
+add_test(test ${CMAKE_CURRENT_SOURCE_DIR}/tests/test.py)
 
 # The server only requires the preamble be installed - and outside of
 # PYTHONPATH is fine.

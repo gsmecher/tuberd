@@ -9,18 +9,26 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 #include <pybind11/embed.h>
-#include <pybind11_json/pybind11_json.hpp>
 
 #include <fmt/format.h>
 
-#include <nlohmann/json.hpp>
-
 namespace py = pybind11;
 using namespace pybind11::literals;
-using json = nlohmann::json;
+
 using namespace httpserver;
+
 namespace po = boost::program_options;
 namespace fs = std::filesystem;
+
+/* Formatter for Python objects */
+template <typename T>
+struct fmt::formatter<T, std::enable_if_t<std::is_base_of<py::object, T>::value, char>> : fmt::formatter<std::string> {
+
+	template <typename FormatContext>
+	auto format(py::object const& o, FormatContext& ctx) {
+		return fmt::formatter<std::string>::format(py::str(o), ctx);
+	}
+};
 
 #define DLL_LOCAL __attribute__((visibility("hidden")))
 
@@ -92,39 +100,39 @@ static const std::map<std::string, std::string> MIME_TYPES = {
 	{".pdf",   "application/pdf"},
 };
 
-static json error_response(std::string const& msg) {
-	return {{ "error", {{ "message", msg }}, }};
+static inline py::object error_response(std::string const& msg) {
+	return py::dict("error"_a=py::dict("message"_a=msg));
 }
 
-static json tuber_server_invoke(py::dict &registry, const json &call) {
-	/* Acquire the GIL. This makes us thread-safe - but any methods we
-	 * invoke should release the GIL (especially if they do their own
-	 * threaded things) in order to avoid pile-ups. */
-	py::gil_scoped_acquire acquire;
+static py::dict tuber_server_invoke(py::dict &registry,
+		py::dict const& call,
+		py::function const& json_loads,
+		py::function const& json_dumps) {
 
 	/* Fast path: function calls */
 	if(call.contains("object") && call.contains("method")) {
 
-		std::string oname = call["object"];
-		std::string mname = call["method"];
+		std::string oname = call["object"].cast<std::string>();
+		std::string mname = call["method"].cast<std::string>();
 
 		/* Populate python_args */
-		py::tuple python_args;
-		auto it_args = call.find("args");
-		if(it_args != call.end()) {
-			if(!it_args->is_array())
+		py::list python_args;
+		if(call.contains("args")) {
+			try {
+				python_args = call["args"];
+			} catch(py::error_already_set) {
 				return error_response("'args' wasn't an array.");
-
-			python_args = *it_args;
+			}
 		}
 
 		/* Populate python_kwargs */
 		py::dict python_kwargs;
-		auto it_kwargs = call.find("kwargs");
-		if(it_kwargs != call.end()) {
-			if(!it_kwargs->is_object())
+		if(call.contains("kwargs")) {
+			try {
+				python_kwargs = call["kwargs"];
+			} catch(py::error_already_set) {
 				return error_response("'kwargs' wasn't an object.");
-			python_kwargs = *it_kwargs;
+			}
 		}
 
 		/* Look up object */
@@ -140,21 +148,21 @@ static json tuber_server_invoke(py::dict &registry, const json &call) {
 		if(verbose >= Verbose::NOISY)
 			fmt::print(stderr, "Dispatch: {}::{}(*{}, **{})...\n",
 					oname, mname,
-					json(python_args).dump(),
-					json(python_kwargs).dump());
+					python_args,
+					python_kwargs);
 
-		/* Dispatch to Python */
+		/* Dispatch to Python - failures emerge as exceptions */
 		py::object response = m(*python_args, **python_kwargs);
 
 		if(verbose >= Verbose::NOISY)
-			fmt::print(stderr, "... response was {}\n", json(response).dump());
+			fmt::print(stderr, "... response was {}\n", json_dumps(response));
 
 		/* Cast back to JSON, wrap in a result object, and return */
-		return { { "result", response } };
+		return py::dict("result"_a=response);
 	}
 
 	if(verbose >= Verbose::NOISY)
-		fmt::print(stderr, "Delegating json {} to describe() slowpath.\n", call.dump());
+		fmt::print(stderr, "Delegating json {} to describe() slowpath.\n", call);
 
 	/* Slow path: object metadata, properties */
 	return py::eval("describe")(registry, call);
@@ -167,64 +175,80 @@ static json tuber_server_invoke(py::dict &registry, const json &call) {
  * Python (in the preamble). */
 class DLL_LOCAL tuber_resource : public http_resource {
 	public:
-		tuber_resource(py::dict const& reg) : reg(reg) {};
+		tuber_resource(py::dict const& reg,
+				py::function const& json_loads,
+				py::function const& json_dumps) :
+			reg(reg),
+			json_loads(json_loads),
+			json_dumps(json_dumps) {};
 
 		const std::shared_ptr<http_response> render(const http_request& req) {
 			try {
 				if(verbose >= Verbose::NOISY)
 					fmt::print(stderr, "Request: {}\n", req.get_content());
 
+				/* Acquire the GIL. This makes us thread-safe -
+				 * but any methods we invoke should release the
+				 * GIL (especially if they do their own
+				 * threaded things) in order to avoid pile-ups.
+				 */
+				py::gil_scoped_acquire acquire;
+
 				/* Parse JSON */
-				json request_body_json = json::parse(req.get_content());
+				py::object request_obj = json_loads(req.get_content());
 
-				if(request_body_json.is_object()) {
+				if(py::isinstance<py::dict>(request_obj)) {
 					/* Simple JSON object - invoke it and return the results. */
-					json result_json;
+					py::object result;
 					try {
-						result_json = tuber_server_invoke(reg, request_body_json);
+						result = tuber_server_invoke(reg, request_obj, json_loads, json_dumps);
 					} catch(std::exception &e) {
-						result_json = error_response(e.what());
+						result = error_response(e.what());
 						if(verbose >= Verbose::NOISY)
-							fmt::print("Exception path response: {}\n", result_json.dump());
+							fmt::print("Exception path response: {}\n", (std::string)(py::str)json_dumps(result));
 					}
-					return std::shared_ptr<http_response>(new string_response(result_json.dump(), http::http_utils::http_ok, MIME_JSON));
+					return std::shared_ptr<http_response>(new string_response(json_dumps(result).cast<std::string>(), http::http_utils::http_ok, MIME_JSON));
 
-				} else if(request_body_json.is_array()) {
+				} else if(py::isinstance<py::list>(request_obj)) {
+					py::list request_list = request_obj;
+
 					/* Array of sub-requests. Error-handling semantics are
 					 * embedded here: if something goes wrong, we do not
 					 * execute subsequent calls but /do/ pad the results
 					 * list to have the expected size. */
-					std::vector<json> result(request_body_json.size());
+					py::list result(py::len(request_list));
 
 					size_t i;
 					try {
 						for(i=0; i<result.size(); i++)
-							result[i] = tuber_server_invoke(reg, request_body_json.at(i));
+							result[i] = tuber_server_invoke(reg, request_list[i], json_loads, json_dumps);
 					} catch(std::exception &e) {
 						result[i] = error_response(e.what());
 						if(verbose >= Verbose::NOISY)
-							fmt::print("Exception path response: {}\n", result[i].dump());
+							fmt::print("Exception path response: {}\n", (std::string)(py::str)json_dumps(result[i]));
 						for(i++; i<result.size(); i++)
-							result.at(i) = error_response("Something went wrong in a preceding call.");
+							result[i] = error_response("Something went wrong in a preceding call.");
 					}
 
-					json result_json = result;
-					return std::shared_ptr<http_response>(new string_response(result_json.dump(), http::http_utils::http_ok, MIME_JSON));
+					std::string result_json = json_dumps(result).cast<std::string>();
+					return std::shared_ptr<http_response>(new string_response(result_json, http::http_utils::http_ok, MIME_JSON));
 				}
 				else {
-					json result_json = error_response("Unexpected type in request.");
-					return std::shared_ptr<http_response>(new string_response(result_json.dump(), http::http_utils::http_ok, MIME_JSON));
+					std::string error = json_dumps(error_response("Unexpected type in request.")).cast<std::string>();
+					return std::shared_ptr<http_response>(new string_response(error, http::http_utils::http_ok, MIME_JSON));
 				}
 			} catch(std::exception &e) {
 				if(verbose >= Verbose::UNEXPECTED)
 					fmt::print(stderr, "Unhappy-path response {}\n", e.what());
 
-				json response = error_response(e.what());
-				return std::shared_ptr<http_response>(new string_response(response.dump(), http::http_utils::http_ok, MIME_JSON));
+				std::string error = json_dumps(error_response(e.what())).cast<std::string>();
+				return std::shared_ptr<http_response>(new string_response(error, http::http_utils::http_ok, MIME_JSON));
 			}
 		}
 	private:
 		py::dict reg;
+		py::function json_loads;
+		py::function json_dumps;
 };
 
 /* Responder for files served out of the local filesystem.
@@ -347,6 +371,11 @@ int main(int argc, char **argv) {
 	/* Load indicated Python initialization scripts */
 	py::eval_file(registry);
 
+	/* Import JSON dumps function so we can use it */
+	py::module_ json = py::module_::import("json");
+	py::function json_loads = json.attr("loads");
+	py::function json_dumps = json.attr("dumps");
+
 	/* Create a registry */
 	py::dict reg = py::eval("registry");
 
@@ -363,7 +392,7 @@ int main(int argc, char **argv) {
 	std::signal(SIGINT, &sigint);
 
 	/* Set up /tuber endpoint */
-	tr = std::make_unique<tuber_resource>(reg);
+	tr = std::make_unique<tuber_resource>(reg, json_loads, json_dumps);
 	tr->disallow_all();
 	tr->set_allowing(MHD_HTTP_METHOD_POST, true);
 	ws->register_resource("/tuber", tr.get());
