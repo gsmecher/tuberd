@@ -68,7 +68,7 @@ class timed_scope {
 		~timed_scope() {
 			if(verbose & Verbose::TIMING) {
 				std::chrono::duration dt = std::chrono::steady_clock::now() - t;
-				fmt::print(stderr, "{}: {}ms",
+				fmt::print(stderr, "{}: {}ms\n",
 						msg,
 						std::chrono::duration_cast<std::chrono::milliseconds>(dt).count());
 			}
@@ -332,6 +332,7 @@ int main(int argc, char **argv) {
 	int port;
 	int max_age;
 	std::string preamble, registry, webroot;
+	std::string json_module;
 
 	po::options_description desc("tuberd");
 	desc.add_options()
@@ -340,6 +341,10 @@ int main(int argc, char **argv) {
 		("max-age",
 		 po::value<int>(&max_age)->default_value(3600),
 		 "maximum cache residency for static (file) assets")
+
+		("json,j",
+		 po::value<std::string>(&json_module)->default_value("json"),
+		 "Python JSON module to use for serialization/deserialization")
 
 		("port,p",
 		 po::value<int>(&port)->default_value(80),
@@ -379,15 +384,32 @@ int main(int argc, char **argv) {
 	py::scoped_interpreter python;
 
 	/* Learn how the Python half lives */
-	py::eval_file(preamble);
+	try {
+		py::eval_file(preamble);
+	} catch(std::exception &e) {
+		fmt::print(stderr, "Error executing preamble {}!\n({})\n", preamble, e.what());
+		return 2;
+	}
 
 	/* Load indicated Python initialization scripts */
-	py::eval_file(registry);
+	try {
+		py::eval_file(registry);
+	} catch(std::exception &e) {
+		fmt::print(stderr, "Error executing registry {}!\n({})\n", registry, e.what());
+		return 3;
+	}
 
 	/* Import JSON dumps function so we can use it */
-	py::module_ json = py::module_::import("json");
-	py::function json_loads = json.attr("loads");
-	py::function json_dumps = json.attr("dumps");
+	py::function json_loads, json_dumps;
+	try {
+		py::module_ json = py::module_::import(json_module.c_str());
+		json_loads = json.attr("loads");
+		json_dumps = json.attr("dumps");
+	} catch(std::exception &e) {
+		fmt::print(stderr, "Unable to import loads/dumps from module {} ({})\n",
+				json_module, e.what());
+		return 4;
+	}
 
 	/* Create a registry */
 	py::dict reg = py::eval("registry");
