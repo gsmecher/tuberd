@@ -1,6 +1,7 @@
 #include <iostream>
 #include <csignal>
 #include <filesystem>
+#include <chrono>
 #include <boost/program_options.hpp>
 
 #include <httpserver.hpp>
@@ -32,42 +33,50 @@ struct fmt::formatter<T, std::enable_if_t<std::is_base_of<py::object, T>::value,
 
 #define DLL_LOCAL __attribute__((visibility("hidden")))
 
-/* Verbosity:
+/* Verbosity is expressed as a bit mask:
  *     0: none (default)
  *     1: report unexpected or unusual cases
  *     2: very noisy
+ *     4: performance profiling
  */
 static enum class Verbose {
 	NONE = 0,	/* default */
 	UNEXPECTED = 1,	/* report unexected or unusual cases */
 	NOISY = 2,	/* message onslaught */
+	TIMING = 4,
 } verbose;
 
-/* Log levels stack up; comparing them is useful when generating messages */
-int operator<=>(Verbose const& v1, Verbose const& v2) {
-	return static_cast<int>(v1) - static_cast<int>(v2);
+/* Operators for log levels */
+inline constexpr int operator&(Verbose const& x, Verbose const& y) {
+	return static_cast<int>(x) & static_cast<int>(y);
 }
 
-/* Needed to assign verbosity from program options. */
+/* Needed to assign verbosity from program options. No validation occurs here. */
 std::istream& operator>>(std::istream& in, Verbose& v) {
 	int token;
 	in >> token;
-
-	switch(token) {
-		case 0:
-			v = Verbose::NONE;
-			break;
-		case 1:
-			v = Verbose::UNEXPECTED;
-			break;
-		case 2:
-			v = Verbose::NOISY;
-			break;
-		default:
-			in.setstate(std::ios_base::failbit);
-	}
+	v = static_cast<Verbose>(token);
 	return in;
 }
+
+class timed_scope {
+	public:
+		timed_scope(std::string const& msg) : msg(msg) {
+			if(verbose & Verbose::TIMING)
+				t = std::chrono::steady_clock::now();
+		}
+		~timed_scope() {
+			if(verbose & Verbose::TIMING) {
+				std::chrono::duration dt = std::chrono::steady_clock::now() - t;
+				fmt::print(stderr, "{}: {}ms",
+						msg,
+						std::chrono::duration_cast<std::chrono::milliseconds>(dt).count());
+			}
+		}
+	private:
+		std::string msg;
+		std::chrono::time_point<std::chrono::steady_clock> t;
+};
 
 /* MIME types */
 static const std::string MIME_JSON="application/json";
@@ -109,6 +118,8 @@ static py::dict tuber_server_invoke(py::dict &registry,
 		py::function const& json_loads,
 		py::function const& json_dumps) {
 
+	timed_scope ts(__func__);
+
 	/* Fast path: function calls */
 	if(call.contains("object") && call.contains("method")) {
 
@@ -145,23 +156,24 @@ static py::dict tuber_server_invoke(py::dict &registry,
 		if(!m)
 			return error_response("Method not found in object.");
 
-		if(verbose >= Verbose::NOISY)
+		if(verbose & Verbose::NOISY)
 			fmt::print(stderr, "Dispatch: {}::{}(*{}, **{})...\n",
 					oname, mname,
 					python_args,
 					python_kwargs);
 
 		/* Dispatch to Python - failures emerge as exceptions */
+		timed_scope ts("Python dispatch");
 		py::object response = m(*python_args, **python_kwargs);
 
-		if(verbose >= Verbose::NOISY)
+		if(verbose & Verbose::NOISY)
 			fmt::print(stderr, "... response was {}\n", json_dumps(response));
 
 		/* Cast back to JSON, wrap in a result object, and return */
 		return py::dict("result"_a=response);
 	}
 
-	if(verbose >= Verbose::NOISY)
+	if(verbose & Verbose::NOISY)
 		fmt::print(stderr, "Delegating json {} to describe() slowpath.\n", call);
 
 	/* Slow path: object metadata, properties */
@@ -184,7 +196,7 @@ class DLL_LOCAL tuber_resource : public http_resource {
 
 		const std::shared_ptr<http_response> render(const http_request& req) {
 			try {
-				if(verbose >= Verbose::NOISY)
+				if(verbose & Verbose::NOISY)
 					fmt::print(stderr, "Request: {}\n", req.get_content());
 
 				/* Acquire the GIL. This makes us thread-safe -
@@ -204,7 +216,7 @@ class DLL_LOCAL tuber_resource : public http_resource {
 						result = tuber_server_invoke(reg, request_obj, json_loads, json_dumps);
 					} catch(std::exception &e) {
 						result = error_response(e.what());
-						if(verbose >= Verbose::NOISY)
+						if(verbose & Verbose::NOISY)
 							fmt::print("Exception path response: {}\n", (std::string)(py::str)json_dumps(result));
 					}
 					return std::shared_ptr<http_response>(new string_response(json_dumps(result).cast<std::string>(), http::http_utils::http_ok, MIME_JSON));
@@ -224,12 +236,13 @@ class DLL_LOCAL tuber_resource : public http_resource {
 							result[i] = tuber_server_invoke(reg, request_list[i], json_loads, json_dumps);
 					} catch(std::exception &e) {
 						result[i] = error_response(e.what());
-						if(verbose >= Verbose::NOISY)
+						if(verbose & Verbose::NOISY)
 							fmt::print("Exception path response: {}\n", (std::string)(py::str)json_dumps(result[i]));
 						for(i++; i<result.size(); i++)
 							result[i] = error_response("Something went wrong in a preceding call.");
 					}
 
+					timed_scope ts("Happy-path JSON serialization");
 					std::string result_json = json_dumps(result).cast<std::string>();
 					return std::shared_ptr<http_response>(new string_response(result_json, http::http_utils::http_ok, MIME_JSON));
 				}
@@ -238,7 +251,7 @@ class DLL_LOCAL tuber_resource : public http_resource {
 					return std::shared_ptr<http_response>(new string_response(error, http::http_utils::http_ok, MIME_JSON));
 				}
 			} catch(std::exception &e) {
-				if(verbose >= Verbose::UNEXPECTED)
+				if(verbose & Verbose::UNEXPECTED)
 					fmt::print(stderr, "Unhappy-path response {}\n", e.what());
 
 				std::string error = json_dumps(error_response(e.what())).cast<std::string>();
@@ -279,7 +292,7 @@ class DLL_LOCAL file_resource : public http_resource {
 
 			/* Serve 404 if the resource does not exist, or we couldn't find it */
 			if(!fs::is_regular_file(path)) {
-				if(verbose >= Verbose::UNEXPECTED)
+				if(verbose & Verbose::UNEXPECTED)
 					fmt::print(stderr, "Unable or unwilling to serve missing or non-file resource {}\n", path.string());
 
 				return std::shared_ptr<http_response>(new string_response("No such file or directory.\n", http::http_utils::http_not_found));
@@ -291,7 +304,7 @@ class DLL_LOCAL file_resource : public http_resource {
 			if(it != MIME_TYPES.end())
 				mime_type = it->second;
 
-			if(verbose >= Verbose::NOISY)
+			if(verbose & Verbose::NOISY)
 				fmt::print(stderr, "Serving {} with {} using MIME type {}\n", req.get_path(), path.string(), mime_type);
 
 			/* Construct response and return it */
