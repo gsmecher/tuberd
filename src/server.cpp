@@ -31,6 +31,9 @@ struct fmt::formatter<T, std::enable_if_t<std::is_base_of<py::object, T>::value,
 	}
 };
 
+using json_loads_t = std::function<py::object(std::string)>;
+using json_dumps_t = std::function<std::string(py::object)>;
+
 #define DLL_LOCAL __attribute__((visibility("hidden")))
 
 /* Verbosity is expressed as a bit mask:
@@ -115,8 +118,8 @@ static inline py::object error_response(std::string const& msg) {
 
 static py::dict tuber_server_invoke(py::dict &registry,
 		py::dict const& call,
-		py::function const& json_loads,
-		py::function const& json_dumps) {
+		json_loads_t const& json_loads,
+		json_dumps_t const& json_dumps) {
 
 	timed_scope ts(__func__);
 
@@ -188,8 +191,8 @@ static py::dict tuber_server_invoke(py::dict &registry,
 class DLL_LOCAL tuber_resource : public http_resource {
 	public:
 		tuber_resource(py::dict const& reg,
-				py::function const& json_loads,
-				py::function const& json_dumps) :
+				json_loads_t json_loads,
+				json_dumps_t json_dumps) :
 			reg(reg),
 			json_loads(json_loads),
 			json_dumps(json_dumps) {};
@@ -219,7 +222,7 @@ class DLL_LOCAL tuber_resource : public http_resource {
 						if(verbose & Verbose::NOISY)
 							fmt::print("Exception path response: {}\n", (std::string)(py::str)json_dumps(result));
 					}
-					return std::shared_ptr<http_response>(new string_response(json_dumps(result).cast<std::string>(), http::http_utils::http_ok, MIME_JSON));
+					return std::shared_ptr<http_response>(new string_response(json_dumps(result), http::http_utils::http_ok, MIME_JSON));
 
 				} else if(py::isinstance<py::list>(request_obj)) {
 					py::list request_list = request_obj;
@@ -237,31 +240,31 @@ class DLL_LOCAL tuber_resource : public http_resource {
 					} catch(std::exception &e) {
 						result[i] = error_response(e.what());
 						if(verbose & Verbose::NOISY)
-							fmt::print("Exception path response: {}\n", (std::string)(py::str)json_dumps(result[i]));
+							fmt::print("Exception path response: {}\n", json_dumps(result[i]));
 						for(i++; i<result.size(); i++)
 							result[i] = error_response("Something went wrong in a preceding call.");
 					}
 
 					timed_scope ts("Happy-path JSON serialization");
-					std::string result_json = json_dumps(result).cast<std::string>();
+					std::string result_json = json_dumps(result);
 					return std::shared_ptr<http_response>(new string_response(result_json, http::http_utils::http_ok, MIME_JSON));
 				}
 				else {
-					std::string error = json_dumps(error_response("Unexpected type in request.")).cast<std::string>();
+					std::string error = json_dumps(error_response("Unexpected type in request."));
 					return std::shared_ptr<http_response>(new string_response(error, http::http_utils::http_ok, MIME_JSON));
 				}
 			} catch(std::exception &e) {
 				if(verbose & Verbose::UNEXPECTED)
 					fmt::print(stderr, "Unhappy-path response {}\n", e.what());
 
-				std::string error = json_dumps(error_response(e.what())).cast<std::string>();
+				std::string error = json_dumps(error_response(e.what()));
 				return std::shared_ptr<http_response>(new string_response(error, http::http_utils::http_ok, MIME_JSON));
 			}
 		}
 	private:
 		py::dict reg;
-		py::function json_loads;
-		py::function json_dumps;
+		json_loads_t json_loads;
+		json_dumps_t json_dumps;
 };
 
 /* Responder for files served out of the local filesystem.
@@ -331,6 +334,7 @@ int main(int argc, char **argv) {
 
 	int port;
 	int max_age;
+	bool orjson_with_numpy;
 	std::string preamble, registry, webroot;
 	std::string json_module;
 
@@ -345,6 +349,10 @@ int main(int argc, char **argv) {
 		("json,j",
 		 po::value<std::string>(&json_module)->default_value("json"),
 		 "Python JSON module to use for serialization/deserialization")
+
+		("orjson-with-numpy",
+		 po::bool_switch(&orjson_with_numpy)->default_value(false),
+		 "Use ORJSON module with fast NumPy serialization support")
 
 		("port,p",
 		 po::value<int>(&port)->default_value(80),
@@ -400,11 +408,27 @@ int main(int argc, char **argv) {
 	}
 
 	/* Import JSON dumps function so we can use it */
-	py::function json_loads, json_dumps;
+	json_loads_t json_loads;
+	json_dumps_t json_dumps;
 	try {
+		if(orjson_with_numpy)
+			json_module = "orjson";
+
+		/* Import Python loads/dumps */
 		py::module_ json = py::module_::import(json_module.c_str());
-		json_loads = json.attr("loads");
-		json_dumps = json.attr("dumps");
+		py::function py_loads = json.attr("loads");
+		py::function py_dumps = json.attr("dumps");
+
+		json_loads = [&py_loads](std::string s) { return py_loads(s); };
+		json_dumps = [&py_dumps](py::object o) { return py_dumps(o).cast<std::string>(); };
+
+		/* If using orjson with NumPy, overload dumps with the right magic. */
+		if(orjson_with_numpy) {
+			py::object OPT_SERIALIZE_NUMPY = json.attr("OPT_SERIALIZE_NUMPY");
+			json_dumps = [py_dumps, OPT_SERIALIZE_NUMPY](py::object o) {
+				return py_dumps(o, std::nullopt, OPT_SERIALIZE_NUMPY).cast<std::string>();
+			};
+		}
 	} catch(std::exception &e) {
 		fmt::print(stderr, "Unable to import loads/dumps from module {} ({})\n",
 				json_module, e.what());
