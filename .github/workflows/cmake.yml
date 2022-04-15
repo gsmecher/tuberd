@@ -13,11 +13,28 @@ jobs:
     steps:
     - uses: actions/checkout@v3
 
+    - name: Check out libhttpserver dependency
+      uses: actions/checkout@v3
+      with:
+        repository: etr/libhttpserver
+        ref: 0.18.2
+        path: libhttpserver
+
     - name: Install Python dependencies
       uses: py-actions/py-dependency-install@v3
 
     - name: Install C++ dependencies
       run: sudo apt-get install -y libboost-program-options-dev libmicrohttpd-dev libfmt-dev
+
+    - name: Build and install libhttpserver
+      run: |
+        cd libhttpserver
+        ./bootstrap
+        mkdir build
+        cd build
+        ../configure
+        make
+        sudo make install
 
     - name: Configure CMake
       run: cmake -B ${{github.workspace}}/build
