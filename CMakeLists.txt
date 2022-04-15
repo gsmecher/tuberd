@@ -22,8 +22,13 @@ include(CTest)
 add_executable(tuberd src/server.cpp)
 target_link_libraries(tuberd PRIVATE boost_program_options fmt::fmt httpserver pybind11::embed)
 
-add_test(test-native-json ${CMAKE_CURRENT_SOURCE_DIR}/tests/test.py)
-add_test(test-orjson-fastpath ${CMAKE_CURRENT_SOURCE_DIR}/tests/test.py --orjson-with-numpy)
+add_test(NAME test-native-json
+	WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+	COMMAND tests/test.py)
+
+add_test(NAME test-orjson-fastpath
+	WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+	COMMAND tests/test.py --orjson-with-numpy)
 
 # The server only requires the preamble be installed - and outside of
 # PYTHONPATH is fine.
