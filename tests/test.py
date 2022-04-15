@@ -1,9 +1,11 @@
-#!/usr/bin/env pytest-3
+#!/usr/bin/env pytest
 
 import pytest
 import subprocess
 import requests
 from requests.packages.urllib3.util.retry import Retry
+
+import numpy as np
 
 TUBERD_PORT = 8080
 
@@ -55,28 +57,38 @@ class Types:
         return arg
 
 
+class NumPy:
+    def returns_numpy_array(self):
+        return np.array([0, 1, 2, 3])
+
+
 registry = {
     "NullObject": NullObject(),
     "ObjectWithMethod": ObjectWithMethod(),
     "ObjectWithProperty": ObjectWithProperty(),
     "Types": Types(),
+    "NumPy": NumPy(),
 }
 
 
 @pytest.fixture(scope="session")
-def tuberd():
+def tuberd(pytestconfig):
     """Spawn (and kill) a tuberd"""
 
-    s = subprocess.Popen(
-        [
-            "./tuberd",
-            f"-p{TUBERD_PORT}",
-            f"--preamble=py/preamble.py",
-            f"--registry=tests/test.py",
-        ]
-    )
-    yield s
+    argv = [
+        "./tuberd",
+        f"-p{TUBERD_PORT}",
+        f"--preamble=py/preamble.py",
+        f"--registry=tests/test.py",
+    ]
 
+    argv.extend(pytestconfig.getoption("tuberd_option"))
+
+    if pytestconfig.getoption("orjson_with_numpy"):
+        argv.append("--orjson-with-numpy")
+
+    s = subprocess.Popen(argv)
+    yield s
     s.terminate()
 
 
@@ -94,7 +106,10 @@ def tuber_call(tuberd):
         # "json" parameter.  However, for convenience's sake, we also allow
         # kwargs to supply a dict parameter since we often call with dicts and
         # this results in a more readable code style.
-        return session.post(f"http://localhost:{TUBERD_PORT}/tuber", json=kwargs if json is None else json).json()
+        return session.post(
+            f"http://localhost:{TUBERD_PORT}/tuber",
+            json=kwargs if json is None else json,
+        ).json()
 
     yield tuber_call
 
@@ -103,45 +118,59 @@ def tuber_call(tuberd):
 # Sanity Checks
 #
 
+def Succeeded(args=None, **kwargs):
+    return dict(result=kwargs or args)
+
+def Failed(**kwargs):
+    return dict(error=kwargs)
 
 def test_empty_request_array(tuber_call):
     assert tuber_call(json=[]) == []
 
 
 def test_fetch_null_metadata(tuber_call):
-    assert tuber_call(object="NullObject") == {"result": {"__doc__": None, "methods": [], "properties": []}}
+    assert tuber_call(object="NullObject") == Succeeded(__doc__=None, methods=[], properties=[])
 
 
 def test_call_nonexistent_object(tuber_call):
-    assert tuber_call(object="NothingHere") == {
-        "error": {"message": "KeyError: ('NothingHere',)\n\nAt:\n  py/preamble.py(24): describe\n"}
-    }
+    assert tuber_call(object="NothingHere") == Failed(
+        message="KeyError: ('NothingHere',)\n\nAt:\n  py/preamble.py(24): describe\n")
 
 
 def test_call_nonexistent_method(tuber_call):
-    assert tuber_call(object="NullObject", method="does_not_exist") == {
-        "error": {"message": "AttributeError: 'NullObject' object has no attribute 'does_not_exist'"}
-    }
+    assert tuber_call(object="NullObject", method="does_not_exist") == Failed(
+        message="AttributeError: 'NullObject' object has no attribute 'does_not_exist'")
+
 
 def test_property_types(tuber_call):
-    assert tuber_call(object="Types", property="STRING") == dict(result=Types.STRING)
-    assert tuber_call(object="Types", property="INTEGER") == dict(result=Types.INTEGER)
-    assert tuber_call(object="Types", property="FLOAT") == dict(result=pytest.approx(Types.FLOAT))
-    assert tuber_call(object="Types", property="LIST") == dict(result=Types.LIST)
-    assert tuber_call(object="Types", property="DICT") == dict(result=Types.DICT)
+    assert tuber_call(object="Types", property="STRING") == Succeeded(Types.STRING)
+    assert tuber_call(object="Types", property="INTEGER") == Succeeded(Types.INTEGER)
+    assert tuber_call(object="Types", property="FLOAT") == Succeeded(pytest.approx(Types.FLOAT))
+    assert tuber_call(object="Types", property="LIST") == Succeeded(Types.LIST)
+    assert tuber_call(object="Types", property="DICT") == Succeeded(Types.DICT)
 
 
 def test_function_types_with_default_arguments(tuber_call):
-    assert tuber_call(object="Types", method="string_function") == dict(result=Types.STRING)
-    assert tuber_call(object="Types", method="integer_function") == dict(result=Types.INTEGER)
-    assert tuber_call(object="Types", method="float_function") == dict(result=pytest.approx(Types.FLOAT))
-    assert tuber_call(object="Types", method="list_function") == dict(result=Types.LIST)
-    assert tuber_call(object="Types", method="dict_function") == dict(result=Types.DICT)
+    assert tuber_call(object="Types", method="string_function") == Succeeded(Types.STRING)
+    assert tuber_call(object="Types", method="integer_function") == Succeeded(Types.INTEGER)
+    assert tuber_call(object="Types", method="float_function") == Succeeded(pytest.approx(Types.FLOAT))
+    assert tuber_call(object="Types", method="list_function") == Succeeded(Types.LIST)
+    assert tuber_call(object="Types", method="dict_function") == Succeeded(Types.DICT)
 
 
 def test_function_types_with_correct_argument_types(tuber_call):
-    assert tuber_call(object="Types", method="string_function", args=["this is a string"]) == dict(result="this is a string")
-    assert tuber_call(object="Types", method="integer_function", args=[6789]) == dict(result=6789)
-    assert tuber_call(object="Types", method="float_function", args=[67.89]) == dict(result=pytest.approx(67.89))
-    assert tuber_call(object="Types", method="list_function", args=[[3, 4, 5, 6]]) == dict(result=[3, 4, 5, 6])
-    assert tuber_call(object="Types", method="dict_function", args=[dict(one="two", three="four")]) == dict(result=dict(one="two", three="four"))
+    assert tuber_call(object="Types", method="string_function", args=["this is a string"]) == Succeeded("this is a string")
+    assert tuber_call(object="Types", method="integer_function", args=[6789]) == Succeeded(6789)
+    assert tuber_call(object="Types", method="float_function", args=[67.89]) == Succeeded(pytest.approx(67.89))
+    assert tuber_call(object="Types", method="list_function", args=[[3, 4, 5, 6]]) == Succeeded([3, 4, 5, 6])
+    assert tuber_call(object="Types", method="dict_function", args=[dict(one="two", three="four")]) == Succeeded(one="two", three="four")
+
+
+#
+# orjson / numpy fastpath tests
+#
+
+
+@pytest.mark.numpy
+def test_numpy_types(tuber_call):
+    assert tuber_call(object="NumPy", method="returns_numpy_array") == dict(result=[0, 1, 2, 3])
