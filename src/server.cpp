@@ -134,7 +134,7 @@ static py::dict tuber_server_invoke(py::dict &registry,
 		if(call.contains("args")) {
 			try {
 				python_args = call["args"];
-			} catch(py::error_already_set) {
+			} catch(py::error_already_set const&) {
 				return error_response("'args' wasn't an array.");
 			}
 		}
@@ -144,7 +144,7 @@ static py::dict tuber_server_invoke(py::dict &registry,
 		if(call.contains("kwargs")) {
 			try {
 				python_kwargs = call["kwargs"];
-			} catch(py::error_already_set) {
+			} catch(py::error_already_set const&) {
 				return error_response("'kwargs' wasn't an object.");
 			}
 		}
@@ -233,7 +233,7 @@ class DLL_LOCAL tuber_resource : public http_resource {
 					 * list to have the expected size. */
 					py::list result(py::len(request_list));
 
-					size_t i;
+					size_t i=0;
 					try {
 						for(i=0; i<result.size(); i++)
 							result[i] = tuber_server_invoke(reg, request_list[i], json_loads, json_dumps);
@@ -253,7 +253,7 @@ class DLL_LOCAL tuber_resource : public http_resource {
 					std::string error = json_dumps(error_response("Unexpected type in request."));
 					return std::shared_ptr<http_response>(new string_response(error, http::http_utils::http_ok, MIME_JSON));
 				}
-			} catch(std::exception &e) {
+			} catch(std::exception const& e) {
 				if(verbose & Verbose::UNEXPECTED)
 					fmt::print(stderr, "Unhappy-path response {}\n", e.what());
 
@@ -334,7 +334,7 @@ int main(int argc, char **argv) {
 
 	int port;
 	int max_age;
-	bool orjson_with_numpy;
+	bool orjson_with_numpy=false;
 	std::string preamble, registry, webroot;
 	std::string json_module;
 
@@ -394,7 +394,7 @@ int main(int argc, char **argv) {
 	/* Learn how the Python half lives */
 	try {
 		py::eval_file(preamble);
-	} catch(std::exception &e) {
+	} catch(std::exception const& e) {
 		fmt::print(stderr, "Error executing preamble {}!\n({})\n", preamble, e.what());
 		return 2;
 	}
@@ -402,7 +402,7 @@ int main(int argc, char **argv) {
 	/* Load indicated Python initialization scripts */
 	try {
 		py::eval_file(registry);
-	} catch(std::exception &e) {
+	} catch(std::exception const& e) {
 		fmt::print(stderr, "Error executing registry {}!\n({})\n", registry, e.what());
 		return 3;
 	}
@@ -419,8 +419,8 @@ int main(int argc, char **argv) {
 		py::function py_loads = json.attr("loads");
 		py::function py_dumps = json.attr("dumps");
 
-		json_loads = [&py_loads](std::string s) { return py_loads(s); };
-		json_dumps = [&py_dumps](py::object o) { return py_dumps(o).cast<std::string>(); };
+		json_loads = [py_loads](std::string s) { return py_loads(s); };
+		json_dumps = [py_dumps](py::object o) { return py_dumps(o).cast<std::string>(); };
 
 		/* If using orjson with NumPy, overload dumps with the right magic. */
 		if(orjson_with_numpy) {
@@ -429,7 +429,7 @@ int main(int argc, char **argv) {
 				return py_dumps(o, std::nullopt, OPT_SERIALIZE_NUMPY).cast<std::string>();
 			};
 		}
-	} catch(std::exception &e) {
+	} catch(std::exception const& e) {
 		fmt::print(stderr, "Unable to import loads/dumps from module {} ({})\n",
 				json_module, e.what());
 		return 4;
@@ -462,14 +462,14 @@ int main(int argc, char **argv) {
 		fr->disallow_all();
 		fr->set_allowing(MHD_HTTP_METHOD_GET, true);
 		ws->register_resource("/", fr.get(), true);
-	} catch(fs::filesystem_error &e) {
+	} catch(fs::filesystem_error const& e) {
 		fmt::print(stderr, "Unable to resolve webroot {}; not serving static content.\n", webroot);
 	}
 
 	/* Go! */
 	try {
 		ws->start(true);
-	} catch(std::exception &e) {
+	} catch(std::exception const& e) {
 		fmt::print("Error: {}", e.what());
 	}
 
