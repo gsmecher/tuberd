@@ -9,6 +9,7 @@ on:
 env:
   CC: gcc-10
   CXX: g++-10
+  LD_LIBRARY_PATH: /usr/local/lib # this is where libhttpserver installs itself
 
 jobs:
   build:
