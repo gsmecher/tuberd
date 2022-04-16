@@ -1,4 +1,4 @@
-#!/usr/bin/env pytest
+#!/usr/bin/env -S pytest -sv
 
 import pytest
 import subprocess
