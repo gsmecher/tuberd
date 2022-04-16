@@ -416,8 +416,8 @@ int main(int argc, char **argv) {
 
 		/* Import Python loads/dumps */
 		py::module json = py::module::import(json_module.c_str());
-		py::function py_loads = json.attr("loads");
-		py::function py_dumps = json.attr("dumps");
+		py::object py_loads = json.attr("loads");
+		py::object py_dumps = json.attr("dumps");
 
 		json_loads = [py_loads](std::string s) { return py_loads(s); };
 		json_dumps = [py_dumps](py::object o) { return py_dumps(o).cast<std::string>(); };
