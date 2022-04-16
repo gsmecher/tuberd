@@ -415,7 +415,7 @@ int main(int argc, char **argv) {
 			json_module = "orjson";
 
 		/* Import Python loads/dumps */
-		py::module_ json = py::module_::import(json_module.c_str());
+		py::module json = py::module::import(json_module.c_str());
 		py::function py_loads = json.attr("loads");
 		py::function py_dumps = json.attr("dumps");
 
