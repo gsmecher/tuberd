@@ -21,7 +21,14 @@ def describe(registry, request):
     methodname = request['method'] if 'method' in request else None
     propertyname = request['property'] if 'property' in request else None
 
-    obj = registry[objname]
+    try:
+       obj = registry[objname]
+    except KeyError:
+        return {
+            'error': {
+                'message': f"Request for an object ({objname}) that wasn't in the registry!"
+            }
+        }
 
     if not methodname and not propertyname:
         # Object metadata.

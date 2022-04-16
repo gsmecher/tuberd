@@ -1,5 +1,7 @@
 #!/usr/bin/env -S pytest -sv
 
+import os
+import pathlib
 import pytest
 import subprocess
 import requests
@@ -75,11 +77,18 @@ registry = {
 def tuberd(pytestconfig):
     """Spawn (and kill) a tuberd"""
 
+    bin_dir = pathlib.Path(os.environ.get('CMAKE_BINARY_DIR', '.'))
+    src_dir = pathlib.Path(os.environ.get('CMAKE_SOURCE_DIR', '.'))
+
+    tuberd = bin_dir / 'tuberd'
+    preamble = src_dir / 'py/preamble.py'
+    registry = src_dir / 'tests/test.py'
+
     argv = [
-        "./tuberd",
+        f"{tuberd}",
         f"-p{TUBERD_PORT}",
-        f"--preamble=py/preamble.py",
-        f"--registry=tests/test.py",
+        f"--preamble={preamble}",
+        f"--registry={registry}",
     ]
 
     argv.extend(pytestconfig.getoption("tuberd_option"))
@@ -134,7 +143,7 @@ def test_fetch_null_metadata(tuber_call):
 
 def test_call_nonexistent_object(tuber_call):
     assert tuber_call(object="NothingHere") == Failed(
-        message="KeyError: ('NothingHere',)\n\nAt:\n  py/preamble.py(24): describe\n")
+        message="Request for an object (NothingHere) that wasn't in the registry!")
 
 
 def test_call_nonexistent_method(tuber_call):

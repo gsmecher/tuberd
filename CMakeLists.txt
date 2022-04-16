@@ -30,6 +30,9 @@ add_test(NAME test-orjson-fastpath
 	WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 	COMMAND tests/test.py --orjson-with-numpy)
 
+set_tests_properties(test-native-json test-orjson-fastpath
+	PROPERTIES ENVIRONMENT "CMAKE_BINARY_DIR=${CMAKE_BINARY_DIR};CMAKE_SOURCE_DIR=${CMAKE_SOURCE_DIR}")
+
 # The server only requires the preamble be installed - and outside of
 # PYTHONPATH is fine.
 install(FILES py/preamble.py DESTINATION /usr/share/tuberd)
