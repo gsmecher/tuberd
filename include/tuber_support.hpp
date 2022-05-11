@@ -159,6 +159,12 @@ public:
 		return std::move(*this);
 	}
 
+	/* Retrieve a name -> name mapping for the Enum. This is attached to a
+	 * tuber-exported object as a property. */
+	pybind11::dict as_dict() {
+		return py_entries;
+	}
+
 private:
 	handle scope;
 	const char* name;
