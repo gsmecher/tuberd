@@ -22,6 +22,9 @@ include(CTest)
 add_executable(tuberd src/server.cpp)
 target_link_libraries(tuberd PRIVATE boost_program_options fmt::fmt httpserver pybind11::embed)
 
+pybind11_add_module(test_module MODULE tests/test_module.cpp)
+target_include_directories(test_module PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+
 add_test(NAME test-native-json
 	WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 	COMMAND tests/test.py)
@@ -31,9 +34,11 @@ add_test(NAME test-orjson-fastpath
 	COMMAND tests/test.py --orjson-with-numpy)
 
 set_tests_properties(test-native-json test-orjson-fastpath
-	PROPERTIES ENVIRONMENT "CMAKE_BINARY_DIR=${CMAKE_BINARY_DIR};CMAKE_SOURCE_DIR=${CMAKE_SOURCE_DIR}")
+	PROPERTIES ENVIRONMENT "CMAKE_BINARY_DIR=${CMAKE_BINARY_DIR};CMAKE_SOURCE_DIR=${CMAKE_SOURCE_DIR};PYTHONPATH=.")
 
 # The server only requires the preamble be installed - and outside of
 # PYTHONPATH is fine.
-install(FILES py/preamble.py DESTINATION /usr/share/tuberd)
-install(TARGETS tuberd)
+set_target_properties(tuberd PROPERTIES PUBLIC_HEADER "include/tuber_support.hpp")
+
+install(FILES py/preamble.py DESTINATION tuberd)
+install(TARGETS tuberd PUBLIC_HEADER DESTINATION include)

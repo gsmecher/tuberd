@@ -8,6 +8,7 @@ import requests
 from requests.packages.urllib3.util.retry import Retry
 
 import numpy as np
+import test_module as tm
 
 TUBERD_PORT = 8080
 
@@ -70,6 +71,7 @@ registry = {
     "ObjectWithProperty": ObjectWithProperty(),
     "Types": Types(),
     "NumPy": NumPy(),
+    "Wrapper": tm.Wrapper(),
 }
 
 
@@ -180,6 +182,63 @@ def test_function_types_with_correct_argument_types(tuber_call):
 #
 
 
-@pytest.mark.numpy
+@pytest.mark.orjson
 def test_numpy_types(tuber_call):
     assert tuber_call(object="NumPy", method="returns_numpy_array") == dict(result=[0, 1, 2, 3])
+
+#
+# pybind11 wrappers
+#
+
+def test_cpp_enum_direct_instantiation():
+    # Directly instantiate enums
+    x = tm.Kind('X')
+    y = tm.Kind('Y')
+    assert x != y
+
+    # Compare two instiantiations
+    assert x == tm.Kind('X')
+    assert y == tm.Kind('Y')
+
+def test_cpp_enum_cpp_to_py():
+    w = tm.Wrapper()
+    x = w.return_x();
+    y = w.return_y();
+
+    assert x == tm.Kind('X')
+    assert y == tm.Kind('Y')
+
+def test_cpp_enum_py_to_cpp_types():
+    w = tm.Wrapper();
+    x = tm.Kind('X')
+    y = tm.Kind('Y')
+
+    assert w.is_x(x)
+    assert w.is_y(y)
+    assert not w.is_x(y)
+
+def test_cpp_enum_py_to_cpp_strings():
+    w = tm.Wrapper();
+
+    assert w.is_x('X')
+    assert w.is_y('Y')
+    assert not w.is_x('Y')
+
+@pytest.mark.skip(reason="Semantics are unclear")
+def test_cpp_enum_py_to_py():
+    x = tm.Kind('X')
+    y = tm.Kind('Y')
+
+    assert x == 'X'
+    assert y == 'Y'
+    assert y != 'X'
+
+@pytest.mark.orjson
+def test_cpp_enum_orjson_serialize():
+    import orjson
+
+    x = tm.Kind('X')
+    y = tm.Kind('Y')
+
+    assert orjson.dumps(x) == b'"X"'
+    assert orjson.dumps(y) == b'"Y"'

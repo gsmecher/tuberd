@@ -18,7 +18,7 @@ def pytest_collection_modifyitems(config, items):
     # Ensure we have orjson, at all - and fail here if we don't.
     import orjson
 
-    skip_numpy = pytest.mark.skip(reason="NumPy is not serializable except with orjson fastpath")
+    skip_orjson = pytest.mark.skip(reason="Test depends on orjson fastpath")
     for item in items:
-        if "numpy" in item.keywords:
-            item.add_marker(skip_numpy)
+        if "orjson" in item.keywords:
+            item.add_marker(skip_orjson)
