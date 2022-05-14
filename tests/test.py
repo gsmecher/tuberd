@@ -103,8 +103,18 @@ def tuberd(pytestconfig):
     s.terminate()
 
 
+#
+# Sanity Checks - Python -> JSON -> C++ -> Python and back again
+#
+
+# This fixture provides a much simpler, synchronous wrapper for functionality
+# normally provided by tuber.py.  It's coded directly - which makes it less
+# flexible, less performant, and easier to understand here.
 @pytest.fixture(scope="session")
 def tuber_call(tuberd):
+    # Although the tuberd argument is not used here, it creates a dependency on
+    # the daemon so it's launched and terminated.
+
     # The tuber daemon can take a little while to start (in particular, it
     # sources this script as a registry) - rather than adding a magic sleep to
     # the subprocess command, we teach the client interface to wait patiently.
@@ -125,14 +135,12 @@ def tuber_call(tuberd):
     yield tuber_call
 
 
-#
-# Sanity Checks
-#
-
 def Succeeded(args=None, **kwargs):
+    '''Wrap a return value for a successful call in its JSON-RPC wrapper'''
     return dict(result=kwargs or args)
 
 def Failed(**kwargs):
+    '''Wrap a return value for an error in its JSON-RPC wrapper'''
     return dict(error=kwargs)
 
 def test_empty_request_array(tuber_call):
@@ -184,10 +192,19 @@ def test_function_types_with_correct_argument_types(tuber_call):
 
 @pytest.mark.orjson
 def test_numpy_types(tuber_call):
-    assert tuber_call(object="NumPy", method="returns_numpy_array") == dict(result=[0, 1, 2, 3])
+    assert tuber_call(object="NumPy", method="returns_numpy_array") == Succeeded([0, 1, 2, 3])
 
 #
 # pybind11 wrappers
+#
+
+@pytest.mark.orjson
+def test_double_vector(tuber_call):
+    assert tuber_call(object="Wrapper", method="increment", args=[[1, 2, 3, 4, 5]]) == Succeeded([2, 3, 4, 5, 6])
+
+#
+# pybind11 strenum tests. These tests are direct library imports and do not
+# exercise tuberd.
 #
 
 def test_cpp_enum_direct_instantiation():

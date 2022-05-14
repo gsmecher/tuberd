@@ -2,14 +2,42 @@ Tuber Server and Client
 =======================
 
 Tuber_ is a C++ server and Python client for exposing an instrumentation
-control plane across a network. Its main features and design principles are:
+control plane across a network.
+
+On a client, you can write Python code like this:
+
+.. code:: python
+
+   >>> some_resource.increment([1, 2, 3, 4, 5])
+   [2, 3, 4, 5, 6]
+
+...and end up with a remote method call on a networked resource written in
+Python or (more usually) C++. The C++ implementation might look like this:
+
+.. code:: c++
+
+   class SomeResource {
+   public:
+       std::vector<int> increment(std::vector<int> x) {
+           std::ranges::for_each(x, [](int &n) { n++; });
+           return x;
+       };
+   };
+
+On the client side, Python needs to know where to find the server. On the
+server side, the C++ code must be registered with pybind11 (just as any other
+pybind11 code) and the tuber server.  Other than that, however, there is no
+ceremony and no boilerplate.
+
+Its main features and design principles are:
 
 - Pythonic call styles, including *args, **kwargs, and DocStrings.
 
 - "Less-is-more" approach to code. For example, Tuber uses pybind11_ and C++ as
   a shim between C and Python, because the combination gives us the shortest
-  and most expressive way to produce the results we want. Tuber is plumbing,
-  and exists only to allow us to do other things.
+  and most expressive way to produce the results we want. It pairs excellently
+  with orjson_ as a JSON interface, which efficiently serializes (for example)
+  NumPy_ arrays created in C++ across the network.
 
 - Schema-less RPC using standard-ish protocols (HTTP 1.1, JSON, and something
   like JSON-RPC_). Avoiding a schema allows server and client code to be
@@ -63,7 +91,8 @@ Anti-goals of this Tuber server include the following:
   am mindful that every additional language or runtime reduces the project's
   accessibility to newcomers.  Perhaps pybind11_ will be eclipsed by something
   in Rust one day - for now, the ability to make casual cross-language calls is
-  essential to keeping Tuber small.
+  essential to keeping Tuber small. (Exception: the orjson JSON library is a
+  wonderful complement to tuber and I recommend using them together!)
 
 Although the Tuber server hosts an embedded Python interpreter and can expose
 embedded resources coded in ordinary Python, it is intended to expose C/C++
@@ -87,6 +116,8 @@ present, you are strongly encouraged to contact Graeme Smecher at
 .. _Jupyter: https://jupyter.org/
 .. _IPython: https://ipython.org/
 .. _libhttpserver: https://github.com/etr/libhttpserver
+.. _NumPy: https://www.numpy.org
+.. _orjson: https://github.com/ijl/orjson
 .. _libmicrohttpd: https://www.gnu.org/software/libmicrohttpd/
 .. _JSON-RPC: https://www.jsonrpc.org/
 .. _pybind11: https://pybind11.readthedocs.io/en/stable/index.html

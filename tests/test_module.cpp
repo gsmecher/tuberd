@@ -1,6 +1,10 @@
 #include <pybind11/pybind11.h>
-namespace py = pybind11;
+#include <pybind11/stl.h>
 #include "tuber_support.hpp"
+
+namespace py = pybind11;
+
+#include <algorithm>
 
 enum class Kind { X, Y };
 
@@ -11,6 +15,11 @@ class Wrapper {
 
 		bool is_x(Kind const& k) const { return k == Kind::X; }
 		bool is_y(Kind const& k) const { return k == Kind::Y; }
+
+		std::vector<int> increment(std::vector<int> x) {
+			std::ranges::for_each(x, [](int &n) { n++; });
+			return x;
+		};
 };
 
 PYBIND11_MODULE(test_module, m) {
@@ -24,5 +33,6 @@ PYBIND11_MODULE(test_module, m) {
 		.def("return_x", &Wrapper::return_x)
 		.def("return_y", &Wrapper::return_y)
 		.def("is_x", &Wrapper::is_x)
-		.def("is_y", &Wrapper::is_y);
+		.def("is_y", &Wrapper::is_y)
+		.def("increment", &Wrapper::increment);
 }
