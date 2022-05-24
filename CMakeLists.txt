@@ -40,5 +40,5 @@ set_tests_properties(test-native-json test-orjson-fastpath
 # PYTHONPATH is fine.
 set_target_properties(tuberd PROPERTIES PUBLIC_HEADER "include/tuber_support.hpp")
 
-install(FILES py/preamble.py DESTINATION tuberd)
+install(FILES py/preamble.py DESTINATION share/tuberd)
 install(TARGETS tuberd PUBLIC_HEADER DESTINATION include)
