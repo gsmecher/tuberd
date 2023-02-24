@@ -11,14 +11,13 @@ def pytest_addoption(parser):
     # changes test behaviour. 
     parser.addoption("--orjson-with-numpy", action="store_true", default=False)
 
+
+# Some tests require orjson - the following skips them unless we're in
+# --orjson-with-numpy mode.
 def pytest_collection_modifyitems(config, items):
     if config.getoption("orjson_with_numpy"):
         return
 
-    # Ensure we have orjson, at all - and fail here if we don't.
-    import orjson
-
-    skip_orjson = pytest.mark.skip(reason="Test depends on orjson fastpath")
     for item in items:
         if "orjson" in item.keywords:
-            item.add_marker(skip_orjson)
+            item.add_marker(pytest.mark.skip(reason="Test depends on orjson fastpath"))

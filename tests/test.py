@@ -96,6 +96,10 @@ def tuberd(pytestconfig):
     argv.extend(pytestconfig.getoption("tuberd_option"))
 
     if pytestconfig.getoption("orjson_with_numpy"):
+        # If we can't import orjson here, it's presumably missing from the
+        # tuberd execution environment as well - in which case, we should skip
+        # the test.
+        pytest.importorskip("orjson")
         argv.append("--orjson-with-numpy")
 
     s = subprocess.Popen(argv)
@@ -252,7 +256,7 @@ def test_cpp_enum_py_to_py():
 
 @pytest.mark.orjson
 def test_cpp_enum_orjson_serialize():
-    import orjson
+    orjson = pytest.importorskip("orjson")
 
     x = tm.Kind('X')
     y = tm.Kind('Y')
