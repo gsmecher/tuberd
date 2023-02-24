@@ -10,6 +10,10 @@ import site
 ver = sysconfig.get_python_version()
 sys.path.append(os.path.expanduser(f"~/.local/lib/python{ver}/site-packages"))
 
+# Similarly, the working directory is a reasonable expectation not met by some
+# versions of pybind11.
+sys.path.append(".")
+
 
 def describe(registry, request):
     '''
