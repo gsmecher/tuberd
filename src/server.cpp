@@ -198,16 +198,16 @@ class DLL_LOCAL tuber_resource : public http_resource {
 			json_dumps(json_dumps) {};
 
 		const std::shared_ptr<http_response> render(const http_request& req) {
+			/* Acquire the GIL. This makes us thread-safe -
+			 * but any methods we invoke should release the
+			 * GIL (especially if they do their own
+			 * threaded things) in order to avoid pile-ups.
+			 */
+			py::gil_scoped_acquire acquire;
+
 			try {
 				if(verbose & Verbose::NOISY)
 					fmt::print(stderr, "Request: {}\n", req.get_content());
-
-				/* Acquire the GIL. This makes us thread-safe -
-				 * but any methods we invoke should release the
-				 * GIL (especially if they do their own
-				 * threaded things) in order to avoid pile-ups.
-				 */
-				py::gil_scoped_acquire acquire;
 
 				/* Parse JSON */
 				py::object request_obj = json_loads(req.get_content());
