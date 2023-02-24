@@ -1,4 +1,15 @@
 import inspect
+import sys
+import os
+import sysconfig
+import site
+
+
+# Although upstream pybind11 allows user sites (check site.ENABLE_USER_SITE),
+# older versions did not.
+ver = sysconfig.get_python_version()
+sys.path.append(os.path.expanduser(f"~/.local/lib/python{ver}/site-packages"))
+
 
 def describe(registry, request):
     '''
