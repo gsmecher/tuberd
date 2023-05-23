@@ -470,7 +470,7 @@ int main(int argc, char **argv) {
 	try {
 		ws->start(true);
 	} catch(std::exception const& e) {
-		fmt::print("Error: {}", e.what());
+		fmt::print("Error: {}\n", e.what());
 	}
 
 	return 0;
