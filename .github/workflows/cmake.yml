@@ -29,7 +29,7 @@ jobs:
       uses: py-actions/py-dependency-install@v3
 
     - name: Install C++ dependencies
-      run: sudo apt-get install -y libboost-program-options-dev libmicrohttpd-dev libfmt-dev pybind11-dev python3-pytest-asyncio
+      run: sudo apt-get install -y libboost-program-options-dev libmicrohttpd-dev libfmt-dev pybind11-dev
 
     - name: Build and install libhttpserver
       run: |
