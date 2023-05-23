@@ -34,7 +34,7 @@ add_test(NAME test-orjson-fastpath
 	COMMAND tests/test.py --orjson-with-numpy)
 
 set_tests_properties(test-native-json test-orjson-fastpath
-	PROPERTIES ENVIRONMENT "CMAKE_BINARY_DIR=${CMAKE_BINARY_DIR};CMAKE_SOURCE_DIR=${CMAKE_SOURCE_DIR};PYTHONPATH=.")
+	PROPERTIES ENVIRONMENT "CMAKE_BINARY_DIR=${CMAKE_BINARY_DIR};CMAKE_SOURCE_DIR=${CMAKE_SOURCE_DIR};PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}/py")
 
 # The server only requires the preamble be installed - and outside of
 # PYTHONPATH is fine.

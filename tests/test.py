@@ -9,6 +9,7 @@ from requests.packages.urllib3.util.retry import Retry
 
 import numpy as np
 import test_module as tm
+import tuber
 
 TUBERD_PORT = 8080
 
@@ -263,3 +264,13 @@ def test_cpp_enum_orjson_serialize():
 
     assert orjson.dumps(x) == b'"X"'
     assert orjson.dumps(y) == b'"Y"'
+
+#
+# tuber.py tests
+#
+
+@pytest.mark.asyncio
+async def test_tuberpy_hello(tuber_call):
+    s = await tuber.TuberObject.instantiate(f"http://localhost:{TUBERD_PORT}/tuber", "Wrapper")
+    x = await s.increment([1,2,3,4,5])
+    assert x == [2,3,4,5,6]

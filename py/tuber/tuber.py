@@ -2,6 +2,7 @@
 Tuber object interface
 """
 
+import aiohttp
 import asyncio
 import atexit
 import contextlib
@@ -17,43 +18,7 @@ try:
 except ModuleNotFoundError:
     import json
 
-try:
-    # Are we in a normal Python environment? This is the happy path.
-    from aiohttp import ClientSession, ClientConnectorError
-except ModuleNotFoundError:
-    # Otherwise, we're probably in a JupyterLite environment.  The aiohttp
-    # libraries aren't supported and we provide a crude hand-drawn facsimile.
-    import pyodide
 
-    class ClientConnectorError(Exception):
-        pass
-
-    class ResultStub:
-        def __init__(self, response):
-            self._response = response
-
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *args):
-            pass
-
-        async def json(self, loads, *args, **kwargs):
-            response = await self._response
-            result = await response.string()
-            return loads(result)
-
-    class ClientSession:
-        def __init__(self, json_serialize):
-            self._dumps = json_serialize
-
-        def post(self, uri, json):
-            return ResultStub(
-                pyodide.http.pyfetch(uri, method="POST", body=self._dumps(json))
-            )
-
-
-from . import tworoutine
 
 # Keep a mapping between event loops and client session objects, so we can
 # reuse clientsessions in an event-loop safe way. This is a slightly cheeky
@@ -63,10 +28,10 @@ from . import tworoutine
 _clientsession = {}
 
 # We also need to ensure these clientsessions are (asynchronously) closed.
-@atexit.register
-@tworoutine.tworoutine
-async def cleanup():
-    await asyncio.gather(*(cs.close() for cs in _clientsession.values()))
+# FIXME
+#@atexit.register
+#async def cleanup():
+#    await asyncio.gather(*(cs.close() for cs in _clientsession.values()))
 
 
 class TuberError(Exception):
@@ -112,6 +77,7 @@ def attribute_blacklisted(name):
         (
             "_sa",
             "_ipython",
+            "_tuber",
         )
     ):
         return True
@@ -119,11 +85,11 @@ def attribute_blacklisted(name):
     return False
 
 
-class Context(tworoutine.tworoutine):
+class Context(object):
     """A context container for TuberCalls. Permits calls to be aggregated.
 
-    Commands are dispatched to the board strictly in-order, but are
-    automatically bundled up to reduce roundtrips.
+    Commands are dispatched strictly in-order, but are automatically bundled
+    up to reduce roundtrips.
     """
 
     def __init__(self, obj, **ctx_kwargs):
@@ -131,37 +97,20 @@ class Context(tworoutine.tworoutine):
         self.obj = obj
         self.ctx_kwargs = ctx_kwargs
 
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        if self.calls:
-            self()
-
     async def __aenter__(self):
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Ensure the context is flushed."""
-
         if self.calls:
-            await (~self)()
+            await self()
 
     def _add_call(self, **request):
-
         future = asyncio.Future()
-
-        # Ensure call is made in the correct context
-        objname = request.setdefault("object", self.obj.tuber_objname)
-        assert (
-            objname == self.obj.tuber_objname
-        ), f"Got call to {objname} in context for {self.obj.tuber_objname}"
-
         self.calls.append((request, future))
-
         return future
 
-    async def __acall__(self):
+    async def __call__(self):
         """Break off a set of calls and return them for execution."""
 
         calls = []
@@ -180,21 +129,27 @@ class Context(tworoutine.tworoutine):
         try:
             cs = _clientsession[loop]
         except KeyError as e:
-            _clientsession[loop] = cs = ClientSession(json_serialize=json.dumps)
+            _clientsession[loop] = cs = aiohttp.ClientSession(json_serialize=json.dumps)
 
         # Create a HTTP request to complete the call. This is a coroutine,
         # so we queue the call and then suspend execution (via 'yield')
         # until it's complete.
         try:
-            async with cs.post(self.obj.tuber_uri, json=calls) as resp:
+            async with cs.post(self.obj._tuber_uri, json=calls) as resp:
                 json_out = await resp.json(loads=_json_loads, content_type=None)
 
-        except ClientConnectorError as e:
+        except aiohttp.ClientConnectorError as e:
             raise TuberNetworkError(e)
 
         # Resolve futures
         results = []
         for (f, r) in zip(futures, json_out):
+            # Always emit warnings, if any occurred
+            if hasattr(r, "warning") and r.warning:
+                for w in r.warning:
+                    warnings.warn(w)
+
+            # Resolve either a result or an error
             if hasattr(r, "error") and r.error:
                 f.set_exception(TuberRemoteError(r.error.message))
             else:
@@ -217,7 +172,7 @@ class Context(tworoutine.tworoutine):
 
             # ensure that a new unique future is returned
             # each time this function is called
-            future = self._add_call(method=name, args=args, kwargs=kwargs)
+            future = self._add_call(object=self.obj._tuber_objname, method=name, args=args, kwargs=kwargs)
 
             return future
 
@@ -235,22 +190,19 @@ class TuberObject:
     To use it, you should subclass this TuberObject.
     """
 
-    _tuber_meta = {}
-    _tuber_meta_properties = {}
-    _tuber_meta_methods = {}
+    _tuber_objname = None
+    _tuber_uri = None
 
-    def tuber_context(self):
-        return Context(self)
+    @classmethod
+    async def instantiate(cls, tuber_uri, tuber_objname):
+        instance = cls()
+        instance._tuber_uri = tuber_uri
+        instance._tuber_objname = tuber_objname
+        await instance.tuber_resolve()
+        return instance
 
-    @property
-    def tuber_uri(self):
-        """Retrieve the URI associated with this TuberResource."""
-        raise NotImplementedError("Subclass needs to define tuber_uri!")
-
-    @property
-    def tuber_objname(self):
-        """Retrieve the Tuber Object associated with this TuberResource."""
-        return self.__class__.__name__
+    def tuber_context(self, **kwargs):
+        return Context(self, **kwargs)
 
     @property
     def __doc__(self):
@@ -268,7 +220,6 @@ class TuberObject:
 
         return sorted(attrs + meta.properties + meta.methods)
 
-    @tworoutine.tworoutine
     async def tuber_resolve(self):
         """Retrieve metadata associated with the remote network resource.
 
@@ -282,33 +233,32 @@ class TuberObject:
         up properties and values (with tab-completion and docstrings)
         on-the-fly as they're needed.
         """
-
-        if self.tuber_uri not in self._tuber_meta:
+        try:
+            return (self._tuber_meta,
+                    self._tuber_meta_properties,
+                    self._tuber_meta_methods)
+        except AttributeError:
             async with self.tuber_context() as ctx:
-                ctx._add_call()
-                meta = await (~ctx)()
+                ctx._add_call(object=self._tuber_objname)
+                meta = await ctx()
                 meta = meta[0]
 
                 for p in meta.properties:
-                    ctx._add_call(property=p)
-                prop_list = await (~ctx)()
+                    ctx._add_call(object=self._tuber_objname, property=p)
+                prop_list = await ctx()
 
                 for m in meta.methods:
-                    ctx._add_call(property=m)
-                meth_list = await (~ctx)()
+                    ctx._add_call(object=self._tuber_objname, property=m)
+                meth_list = await ctx()
 
                 props = dict(zip(meta.properties, prop_list))
                 methods = dict(zip(meta.methods, meth_list))
 
-            self._tuber_meta_properties[self.tuber_uri] = props
-            self._tuber_meta_methods[self.tuber_uri] = methods
-            self._tuber_meta[self.tuber_uri] = meta
+            self._tuber_meta = meta
+            self._tuber_meta_properties = props
+            self._tuber_meta_methods = methods
+            return (meta, props, methods)
 
-        return (
-            self._tuber_meta[self.tuber_uri],
-            self._tuber_meta_properties[self.tuber_uri],
-            self._tuber_meta_methods[self.tuber_uri],
-        )
 
     def __getattr__(self, name):
         """Remote function call magic.
@@ -326,11 +276,9 @@ class TuberObject:
         # Make sure this request corresponds to something in the underlying
         # TuberObject.
         try:
-            (meta, metap, metam) = (
-                self._tuber_meta[self.tuber_uri],
-                self._tuber_meta_properties[self.tuber_uri],
-                self._tuber_meta_methods[self.tuber_uri],
-            )
+            meta, metap, metam = (self._tuber_meta,
+                                  self._tuber_meta_properties,
+                                  self._tuber_meta_methods)
         except KeyError as e:
             raise TuberStateError(
                 e,
@@ -347,15 +295,14 @@ class TuberObject:
 
         if name in meta.methods:
             # Generate a callable prototype
-            @tworoutine.tworoutine
             async def invoke(self, *args, **kwargs):
                 async with self.tuber_context() as ctx:
                     result = getattr(ctx, name)(*args, **kwargs)
-                return result.result()
+                return await result
 
             # Attach DocStrings, if provided and valid
             try:
-                invoke.__acall__.__doc__ = textwrap.dedent(metam[name].__doc__)
+                invoke.__doc__ = textwrap.dedent(metam[name].__doc__)
             except:
                 pass
 
