@@ -1,5 +1,7 @@
 import pytest
 
+pytest_plugins = ("pytest_asyncio", )
+
 # Allow test invocation to specify arguments to tuberd backend (this way, we
 # can re-use the same test machinery across different json libraries.)
 def pytest_addoption(parser):

@@ -2,6 +2,7 @@
 
 import os
 import pathlib
+import textwrap
 import pytest
 import subprocess
 import requests
@@ -274,3 +275,29 @@ async def test_tuberpy_hello(tuber_call):
     s = await tuber.TuberObject.instantiate(f"http://localhost:{TUBERD_PORT}/tuber", "Wrapper")
     x = await s.increment([1,2,3,4,5])
     assert x == [2,3,4,5,6]
+
+@pytest.mark.asyncio
+async def test_tuberpy_dir(tuber_call):
+    '''Ensure embedded methods end up in dir() of objects.
+
+    This is a crude proxy for the ability to tab-complete.'''
+    s = await tuber.TuberObject.instantiate(f"http://localhost:{TUBERD_PORT}/tuber", "Wrapper")
+    assert("increment" in dir(s))
+
+@pytest.mark.asyncio
+async def test_tuberpy_module_docstrings(tuber_call):
+    '''Ensure docstrings in C++ methods end up in the TuberObject's __doc__ dunder.'''
+
+    s = await tuber.TuberObject.instantiate(f"http://localhost:{TUBERD_PORT}/tuber", "Wrapper")
+    assert(s.__doc__ == textwrap.dedent('''
+        This is the object DocString, defined in C++.''').lstrip())
+
+@pytest.mark.asyncio
+async def test_tuberpy_method_docstrings(tuber_call):
+    '''Ensure docstrings in C++ methods end up in the TuberObject's __doc__ dunder.'''
+
+    s = await tuber.TuberObject.instantiate(f"http://localhost:{TUBERD_PORT}/tuber", "Wrapper")
+    assert(s.increment.__doc__ == textwrap.dedent('''
+        increment(self: test_module.Wrapper, x: List[int]) -> List[int]
+
+        A function that increments each element in its argument list.''').lstrip())

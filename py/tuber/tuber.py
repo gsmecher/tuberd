@@ -8,6 +8,7 @@ import atexit
 import contextlib
 import socket
 import textwrap
+import types
 import urllib
 import warnings
 import weakref
@@ -208,17 +209,13 @@ class TuberObject:
     def __doc__(self):
         """Construct DocStrings using metadata from the underlying resource."""
 
-        (meta, _, _) = self._tuber_get_meta()
-
-        return meta.__doc__
+        return self._tuber_meta.__doc__
 
     def __dir__(self):
         """Provide a list of what's here. (Used for tab-completion.)"""
 
-        attrs = dir(super(self.__class__, self))
-        (meta, _, _) = self._tuber_get_meta()
-
-        return sorted(attrs + meta.properties + meta.methods)
+        attrs = dir(super(TuberObject, self))
+        return sorted(attrs + self._tuber_meta.properties + self._tuber_meta.methods)
 
     async def tuber_resolve(self):
         """Retrieve metadata associated with the remote network resource.
@@ -307,7 +304,7 @@ class TuberObject:
                 pass
 
             # Associate as a class method.
-            setattr(self.__class__, name, invoke)
+            setattr(self, name, types.MethodType(invoke, self))
             return getattr(self, name)
 
 

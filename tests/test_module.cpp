@@ -3,6 +3,7 @@
 #include "tuber_support.hpp"
 
 namespace py = pybind11;
+using namespace pybind11::literals;
 
 #include <algorithm>
 
@@ -28,11 +29,15 @@ PYBIND11_MODULE(test_module, m) {
 	kind.value("X", Kind::X)
 		.value("Y", Kind::Y);
 
-	py::class_<Wrapper>(m, "Wrapper")
+	auto w = py::class_<Wrapper>(m, "Wrapper")
 		.def(py::init())
 		.def("return_x", &Wrapper::return_x)
 		.def("return_y", &Wrapper::return_y)
 		.def("is_x", &Wrapper::is_x)
 		.def("is_y", &Wrapper::is_y)
-		.def("increment", &Wrapper::increment);
+		.def("increment", &Wrapper::increment,
+				"x"_a,
+				"A function that increments each element in its argument list.");
+
+	w.doc() = "This is the object DocString, defined in C++.";
 }
