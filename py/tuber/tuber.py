@@ -20,6 +20,16 @@ except ModuleNotFoundError:
     import json
 
 
+async def resolve(objname, hostname):
+    '''Create a local reference to a networked resource.
+
+    This is the recommended way to connect to remote tuberd instances.
+    '''
+
+    instance = TuberObject(objname, f'http://{hostname}/tuber')
+    await instance.tuber_resolve()
+    return instance
+
 # Keep a mapping between event loops and client session objects, so we can
 # reuse clientsessions in an event-loop safe way. This is a slightly cheeky
 # way to avoid carrying around global state, and requiring that state be
@@ -33,10 +43,6 @@ class TuberError(Exception):
 
 
 class TuberStateError(TuberError):
-    pass
-
-
-class TuberNetworkError(TuberError):
     pass
 
 
@@ -128,12 +134,8 @@ class Context(object):
         # Create a HTTP request to complete the call. This is a coroutine,
         # so we queue the call and then suspend execution (via 'yield')
         # until it's complete.
-        try:
-            async with cs.post(self.obj._tuber_uri, json=calls) as resp:
-                json_out = await resp.json(loads=_json_loads, content_type=None)
-
-        except aiohttp.ClientConnectorError as e:
-            raise TuberNetworkError(e)
+        async with cs.post(self.obj._tuber_uri, json=calls) as resp:
+            json_out = await resp.json(loads=_json_loads, content_type=None)
 
         # Resolve futures
         results = []
@@ -184,16 +186,9 @@ class TuberObject:
     To use it, you should subclass this TuberObject.
     """
 
-    _tuber_objname = None
-    _tuber_uri = None
-
-    @classmethod
-    async def instantiate(cls, tuber_uri, tuber_objname):
-        instance = cls()
-        instance._tuber_uri = tuber_uri
-        instance._tuber_objname = tuber_objname
-        await instance.tuber_resolve()
-        return instance
+    def __init__(self, objname, uri):
+        self._tuber_objname = objname
+        self._tuber_uri = uri
 
     def tuber_context(self, **kwargs):
         return Context(self, **kwargs)

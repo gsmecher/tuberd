@@ -17,6 +17,8 @@ import weakref
 from requests.packages.urllib3.util.retry import Retry
 
 TUBERD_PORT = 8080
+TUBERD_HOSTNAME = f'localhost:{TUBERD_PORT}'
+TUBERD_URI = f'http://{TUBERD_HOSTNAME}/tuber'
 
 # REGISTRY DEFINITIONS
 #
@@ -130,7 +132,7 @@ def tuber_call(tuberd):
     # the subprocess command, we teach the client interface to wait patiently.
     adapter = requests.adapters.HTTPAdapter(max_retries=Retry(total=10, backoff_factor=1))
     session = requests.Session()
-    session.mount(f"http://localhost:{TUBERD_PORT}", adapter)
+    session.mount(TUBERD_URI, adapter)
 
     def tuber_call(json=None, **kwargs):
         # The most explicit call style passes POST content via an explicit
@@ -138,7 +140,7 @@ def tuber_call(tuberd):
         # kwargs to supply a dict parameter since we often call with dicts and
         # this results in a more readable code style.
         return session.post(
-            f"http://localhost:{TUBERD_PORT}/tuber",
+            TUBERD_URI,
             json=kwargs if json is None else json,
         ).json()
 
@@ -276,7 +278,7 @@ def test_cpp_enum_orjson_serialize():
 
 @pytest.mark.asyncio
 async def test_tuberpy_hello(tuber_call):
-    s = await tuber.TuberObject.instantiate(f"http://localhost:{TUBERD_PORT}/tuber", "Wrapper")
+    s = await tuber.resolve("Wrapper", TUBERD_HOSTNAME)
     x = await s.increment([1,2,3,4,5])
     assert x == [2,3,4,5,6]
 
@@ -285,14 +287,14 @@ async def test_tuberpy_dir(tuber_call):
     '''Ensure embedded methods end up in dir() of objects.
 
     This is a crude proxy for the ability to tab-complete.'''
-    s = await tuber.TuberObject.instantiate(f"http://localhost:{TUBERD_PORT}/tuber", "Wrapper")
+    s = await tuber.resolve("Wrapper", TUBERD_HOSTNAME)
     assert("increment" in dir(s))
 
 @pytest.mark.asyncio
 async def test_tuberpy_module_docstrings(tuber_call):
     '''Ensure docstrings in C++ methods end up in the TuberObject's __doc__ dunder.'''
 
-    s = await tuber.TuberObject.instantiate(f"http://localhost:{TUBERD_PORT}/tuber", "Wrapper")
+    s = await tuber.resolve("Wrapper", TUBERD_HOSTNAME)
     assert(s.__doc__ == textwrap.dedent('''
         This is the object DocString, defined in C++.''').lstrip())
 
@@ -300,7 +302,7 @@ async def test_tuberpy_module_docstrings(tuber_call):
 async def test_tuberpy_method_docstrings(tuber_call):
     '''Ensure docstrings in C++ methods end up in the TuberObject's __doc__ dunder.'''
 
-    s = await tuber.TuberObject.instantiate(f"http://localhost:{TUBERD_PORT}/tuber", "Wrapper")
+    s = await tuber.resolve("Wrapper", TUBERD_HOSTNAME)
     assert(s.increment.__doc__ == textwrap.dedent('''
         increment(self: test_module.Wrapper, x: List[int]) -> List[int]
 
@@ -309,7 +311,7 @@ async def test_tuberpy_method_docstrings(tuber_call):
 @pytest.mark.asyncio
 async def test_tuberpy_session_cache(tuber_call):
     '''Ensure we don't create a new ClientSession with every call.'''
-    s = await tuber.TuberObject.instantiate(f"http://localhost:{TUBERD_PORT}/tuber", "Wrapper")
+    s = await tuber.resolve("Wrapper", TUBERD_HOSTNAME)
     await s.increment([1,2,3])
     aiohttp.ClientSession = None  # break ClientSession instantiation
     await s.increment([4,5,6])
