@@ -21,14 +21,15 @@ except ModuleNotFoundError:
 
 
 async def resolve(objname, hostname):
-    '''Create a local reference to a networked resource.
+    """Create a local reference to a networked resource.
 
     This is the recommended way to connect to remote tuberd instances.
-    '''
+    """
 
-    instance = TuberObject(objname, f'http://{hostname}/tuber')
+    instance = TuberObject(objname, f"http://{hostname}/tuber")
     await instance.tuber_resolve()
     return instance
+
 
 # Keep a mapping between event loops and client session objects, so we can
 # reuse clientsessions in an event-loop safe way. This is a slightly cheeky
@@ -139,7 +140,7 @@ class Context(object):
 
         # Resolve futures
         results = []
-        for (f, r) in zip(futures, json_out):
+        for f, r in zip(futures, json_out):
             # Always emit warnings, if any occurred
             if hasattr(r, "warning") and r.warning:
                 for w in r.warning:
@@ -161,7 +162,6 @@ class Context(object):
 
         # Queue methods calls.
         def caller(*args, **kwargs):
-
             # Add extra arguments where they're provided
             kwargs = kwargs.copy()
             kwargs.update(self.ctx_kwargs)
@@ -219,9 +219,7 @@ class TuberObject:
         on-the-fly as they're needed.
         """
         try:
-            return (self._tuber_meta,
-                    self._tuber_meta_properties,
-                    self._tuber_meta_methods)
+            return (self._tuber_meta, self._tuber_meta_properties, self._tuber_meta_methods)
         except AttributeError:
             async with self.tuber_context() as ctx:
                 ctx._add_call(object=self._tuber_objname)
@@ -244,7 +242,6 @@ class TuberObject:
             self._tuber_meta_methods = methods
             return (meta, props, methods)
 
-
     def __getattr__(self, name):
         """Remote function call magic.
 
@@ -261,9 +258,7 @@ class TuberObject:
         # Make sure this request corresponds to something in the underlying
         # TuberObject.
         try:
-            meta, metap, metam = (self._tuber_meta,
-                                  self._tuber_meta_properties,
-                                  self._tuber_meta_methods)
+            meta, metap, metam = (self._tuber_meta, self._tuber_meta_properties, self._tuber_meta_methods)
         except KeyError as e:
             raise TuberStateError(
                 e,
