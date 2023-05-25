@@ -20,19 +20,12 @@ except ModuleNotFoundError:
     import json
 
 
-
 # Keep a mapping between event loops and client session objects, so we can
 # reuse clientsessions in an event-loop safe way. This is a slightly cheeky
 # way to avoid carrying around global state, and requiring that state be
 # consistent with whatever event loop is running in whichever context it's
 # used. See https://docs.aiohttp.org/en/stable/faq.html
-_clientsession = {}
-
-# We also need to ensure these clientsessions are (asynchronously) closed.
-# FIXME
-#@atexit.register
-#async def cleanup():
-#    await asyncio.gather(*(cs.close() for cs in _clientsession.values()))
+_clientsession = weakref.WeakKeyDictionary()
 
 
 class TuberError(Exception):

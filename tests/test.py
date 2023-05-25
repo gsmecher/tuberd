@@ -1,16 +1,20 @@
 #!/usr/bin/env -S pytest -sv
 
+import aiohttp
+import asyncio
+import importlib
+import numpy as np
 import os
 import pathlib
-import textwrap
 import pytest
-import subprocess
 import requests
-from requests.packages.urllib3.util.retry import Retry
-
-import numpy as np
+import subprocess
 import test_module as tm
+import textwrap
 import tuber
+import weakref
+
+from requests.packages.urllib3.util.retry import Retry
 
 TUBERD_PORT = 8080
 
@@ -301,3 +305,13 @@ async def test_tuberpy_method_docstrings(tuber_call):
         increment(self: test_module.Wrapper, x: List[int]) -> List[int]
 
         A function that increments each element in its argument list.''').lstrip())
+
+@pytest.mark.asyncio
+async def test_tuberpy_session_cache(tuber_call):
+    '''Ensure we don't create a new ClientSession with every call.'''
+    s = await tuber.TuberObject.instantiate(f"http://localhost:{TUBERD_PORT}/tuber", "Wrapper")
+    await s.increment([1,2,3])
+    aiohttp.ClientSession = None  # break ClientSession instantiation
+    await s.increment([4,5,6])
+    importlib.reload(aiohttp)
+    assert aiohttp.ClientSession  # make sure we fixed it
