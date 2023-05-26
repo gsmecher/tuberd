@@ -352,3 +352,29 @@ async def test_tuberpy_session_cache(tuber_call):
     await s.increment([4, 5, 6])
     importlib.reload(aiohttp)
     assert aiohttp.ClientSession  # make sure we fixed it
+
+
+@pytest.mark.asyncio
+async def test_tuberpy_async_context(tuber_call):
+    """Ensure we can use tuber_contexts to batch calls."""
+    s = await tuber.resolve("Wrapper", TUBERD_HOSTNAME)
+    async with s.tuber_context() as ctx:
+        r1 = ctx.increment([1, 2, 3])
+        r2 = ctx.increment([2, 3, 4])
+
+    r1, r2 = await asyncio.gather(r1, r2)
+    assert r1 == [2, 3, 4]
+    assert r2 == [3, 4, 5]
+
+
+@pytest.mark.asyncio
+async def test_tuberpy_async_context_with_kwargs(tuber_call):
+    """Ensure we can use tuber_contexts to batch calls."""
+    s = await tuber.resolve("Wrapper", TUBERD_HOSTNAME)
+    async with s.tuber_context(x=[1, 2, 3]) as ctx:
+        r1 = ctx.increment()
+        r2 = ctx.increment()
+
+    r1, r2 = await asyncio.gather(r1, r2)
+    assert r1 == [2, 3, 4]
+    assert r2 == [2, 3, 4]
