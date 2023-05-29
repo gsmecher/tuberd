@@ -37,7 +37,9 @@ PYBIND11_MODULE(test_module, m) {
 		.def("is_y", &Wrapper::is_y)
 		.def("increment", &Wrapper::increment,
 				"x"_a,
-				"A function that increments each element in its argument list.");
+				"A function that increments each element in its argument list.")
+		.def("unserializable", [](const Wrapper &w) { return w; })
+		;
 
 	w.doc() = "This is the object DocString, defined in C++.";
 }

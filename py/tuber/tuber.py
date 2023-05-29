@@ -138,6 +138,14 @@ class Context(object):
         async with cs.post(self.obj._tuber_uri, json=calls) as resp:
             json_out = await resp.json(loads=_json_loads, content_type=None)
 
+        if hasattr(json_out, "error"):
+            # Oops - this is actually a server-side error that bubbles
+            # through. (See test_tuberpy_async_context_with_unserializable.)
+            # We made an array request, and received an object response
+            # because of an exception-catching scope in the server. Do the
+            # best we can.
+            raise TuberRemoteError(json_out.error.message)
+
         # Resolve futures
         results = []
         for f, r in zip(futures, json_out):

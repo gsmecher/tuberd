@@ -227,6 +227,11 @@ def test_double_vector(tuber_call):
     assert tuber_call(object="Wrapper", method="increment", args=[[1, 2, 3, 4, 5]]) == Succeeded([2, 3, 4, 5, 6])
 
 
+def test_unserializable(tuber_call):
+    # Errors differ between orjson and standard json
+    assert tuber_call(object="Wrapper", method="unserializable")["error"]["message"].startswith("TypeError: ")
+
+
 #
 # pybind11 strenum tests. These tests are direct library imports and do not
 # exercise tuberd.
@@ -378,3 +383,48 @@ async def test_tuberpy_async_context_with_kwargs(tuber_call):
     r1, r2 = await asyncio.gather(r1, r2)
     assert r1 == [2, 3, 4]
     assert r2 == [2, 3, 4]
+
+
+@pytest.mark.asyncio
+async def test_tuberpy_async_context_with_exception(tuber_call):
+    """Ensure exceptions in a sequence of calls show up as expected."""
+    s = await tuber.resolve("Wrapper", TUBERD_HOSTNAME)
+    async with s.tuber_context() as ctx:
+        r1 = ctx.increment([1, 2, 3])  # fine
+        r2 = ctx.increment(4)  # wrong type
+        r3 = ctx.increment([5, 6, 6])  # shouldn't execute
+
+    await r1
+
+    with pytest.raises(tuber.TuberRemoteError):
+        await r2
+
+    with pytest.raises(tuber.TuberRemoteError):
+        await r3
+
+
+@pytest.mark.asyncio
+async def test_tuberpy_unserializable(tuber_call):
+    """Ensure unserializable objects return an error."""
+    s = await tuber.resolve("Wrapper", TUBERD_HOSTNAME)
+    with pytest.raises(tuber.TuberRemoteError):
+        await s.unserializable()
+
+
+@pytest.mark.xfail
+@pytest.mark.asyncio
+async def test_tuberpy_async_context_with_unserializable(tuber_call):
+    """Ensure exceptions in a sequence of calls show up as expected."""
+    s = await tuber.resolve("Wrapper", TUBERD_HOSTNAME)
+    async with s.tuber_context() as ctx:
+        r1 = ctx.increment([1, 2, 3])  # fine
+        r2 = ctx.unserializable()
+        r3 = ctx.increment([5, 6, 6])  # shouldn't execute
+
+    await r1
+
+    with pytest.raises(tuber.TuberRemoteError):
+        await r2
+
+    with pytest.raises(tuber.TuberRemoteError):
+        await r3

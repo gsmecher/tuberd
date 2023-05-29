@@ -233,19 +233,23 @@ class DLL_LOCAL tuber_resource : public http_resource {
 					 * list to have the expected size. */
 					py::list result(py::len(request_list));
 
-					size_t i=0;
-					try {
-						for(i=0; i<result.size(); i++)
+					for(size_t i=0; i<result.size(); i++)
+						try {
 							result[i] = tuber_server_invoke(reg, request_list[i], json_loads, json_dumps);
-					} catch(std::exception &e) {
-						result[i] = error_response(e.what());
-						if(verbose & Verbose::NOISY)
-							fmt::print("Exception path response: {}\n", json_dumps(result[i]));
-						for(i++; i<result.size(); i++)
-							result[i] = error_response("Something went wrong in a preceding call.");
-					}
+						} catch(std::exception &e) {
+							result[i] = error_response(e.what());
+							if(verbose & Verbose::NOISY)
+								fmt::print("Exception path response: {}\n", json_dumps(result[i]));
+
+							/* Flag subsequent calls as failures, too. This also exits
+							 * the loop without dispatching anything else. */
+							for(i++; i<result.size(); i++)
+								result[i] = error_response("Something went wrong in a preceding call.");
+						}
 
 					timed_scope ts("Happy-path JSON serialization");
+
+					/* FIXME: serialization failure in an array call returns with an object structure! */
 					std::string result_json = json_dumps(result);
 					return std::shared_ptr<http_response>(new string_response(result_json, http::http_utils::http_ok, MIME_JSON));
 				}
