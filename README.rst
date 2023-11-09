@@ -68,9 +68,7 @@ Its main features and design principles are:
 
 - A friendly interactive experience using Jupyter_/IPython_-style REPL
   environments. Tuber servers export metadata that can be used to provide
-  DocStrings and tab-completion for RPC resources. The use of "tworoutines_"
-  allows asynchronously coded functions to be used in an interactive REPL.
-  (This may be phased out now that "autoawait_" is present in IPython.)
+  DocStrings and tab-completion for RPC resources.
 
 - The ability to serve a web-based UI using static JavaScript, CSS, and HTML.
 
@@ -124,5 +122,4 @@ present, you are strongly encouraged to contact Graeme Smecher at
 .. _C10K: http://www.kegel.com/c10k.html
 .. _asyncio: https://docs.python.org/3/library/asyncio.html
 .. _aiohttp: https://docs.aiohttp.org/en/stable/
-.. _tworoutines: http://threespeedlogic.com/python-tworoutines.html
 .. _autoawait: https://ipython.readthedocs.io/en/stable/interactive/autoawait.html
