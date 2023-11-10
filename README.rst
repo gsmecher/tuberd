@@ -100,9 +100,8 @@ interpreted embedded runtime.
 
 Tuber is licensed using the 3-clause BSD license (BSD-3-Clause). This software
 is intended to be useful, and its licensing is intended to be pragmatic. If
-licensing is a stumbling block for you, please contact me at present, you are
-encouraged to contact Graeme Smecher at `gsmecher@threespeedlogic.com
-<mailto:gsmecher@threespeedlogic.com>`_.
+licensing is a stumbling block for you, please contact me at
+`gsmecher@threespeedlogic.com <mailto:gsmecher@threespeedlogic.com>`_.
 
 .. _Tuber: https://github.com/gsmecher/tuber
 .. _GPLv3: https://www.gnu.org/licenses/gpl-3.0.en.html
