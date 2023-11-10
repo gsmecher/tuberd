@@ -98,16 +98,11 @@ code. The Python interpeter provides a convenient, Pythonic approach to
 attribute and method lookup and dispatch without the overhead of a fully
 interpreted embedded runtime.
 
-Tuber is licensed using the GNU GPLv3_ license. This license is inconveniently
-restrictive, and is intended as a placeholder until I determine which of the
-myriad of more permissive licenses is most appropriate.  Specifically, I intend
-to relax licensing in order to allow third parties to use the Tuber server and
-client with closed-source client codebases. (Note that open-source licenses, in
-general, create an obligation to make source code available - but only where
-compiled programs are distributed. You do not generally have an obligation to
-publicly disclose source code.) If licensing is an issue and this text is still
-present, you are strongly encouraged to contact Graeme Smecher at
-`gsmecher@threespeedlogic.com <mailto:gsmecher@threespeedlogic.com>`_.
+Tuber is licensed using the 3-clause BSD license (BSD-3-Clause). This software
+is intended to be useful, and its licensing is intended to be pragmatic. If
+licensing is a stumbling block for you, please contact me at present, you are
+encouraged to contact Graeme Smecher at `gsmecher@threespeedlogic.com
+<mailto:gsmecher@threespeedlogic.com>`_.
 
 .. _Tuber: https://github.com/gsmecher/tuber
 .. _GPLv3: https://www.gnu.org/licenses/gpl-3.0.en.html
