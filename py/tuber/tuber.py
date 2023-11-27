@@ -150,8 +150,8 @@ class Context(object):
         results = []
         for f, r in zip(futures, json_out):
             # Always emit warnings, if any occurred
-            if hasattr(r, "warning") and r.warning:
-                for w in r.warning:
+            if hasattr(r, "warnings") and r.warnings:
+                for w in r.warnings:
                     warnings.warn(w)
 
             # Resolve either a result or an error

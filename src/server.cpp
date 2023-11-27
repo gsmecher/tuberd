@@ -2,6 +2,7 @@
 #include <csignal>
 #include <filesystem>
 #include <chrono>
+#include <queue>
 #include <boost/program_options.hpp>
 
 #include <httpserver.hpp>
@@ -116,6 +117,16 @@ static inline py::object error_response(std::string const& msg) {
 	return py::dict("error"_a=py::dict("message"_a=msg));
 }
 
+std::vector<std::string> warning_list;
+static void showwarning(py::object message,
+			py::object category,
+			py::object filename,
+			py::object lineno,
+			py::object file,
+			py::object line) {
+	warning_list.push_back(py::str(message).cast<std::string>());
+}
+
 static py::dict tuber_server_invoke(py::dict &registry,
 		py::dict const& call,
 		json_loads_t const& json_loads,
@@ -173,6 +184,12 @@ static py::dict tuber_server_invoke(py::dict &registry,
 			fmt::print(stderr, "... response was {}\n", json_dumps(response));
 
 		/* Cast back to JSON, wrap in a result object, and return */
+		if(!warning_list.empty()) {
+			py::list warnings = py::cast(warning_list);
+			warning_list.clear();
+			return py::dict("result"_a=response, "warnings"_a=warnings);
+		}
+
 		return py::dict("result"_a=response);
 	}
 
@@ -394,6 +411,10 @@ int main(int argc, char **argv) {
 	 */
 
 	py::scoped_interpreter python;
+
+	/* By default, capture warnings */
+	py::module warnings = py::module::import("warnings");
+	warnings.attr("showwarning") = py::cpp_function(showwarning);
 
 	/* Learn how the Python half lives */
 	try {
