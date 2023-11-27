@@ -16,17 +16,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Check out libhttpserver dependency
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
       with:
         repository: etr/libhttpserver
         ref: 0.18.2
         path: libhttpserver
 
     - name: Install Python dependencies
-      uses: py-actions/py-dependency-install@v3
+      uses: py-actions/py-dependency-install@v4
 
     - name: Install C++ dependencies
       run: sudo apt-get install -y libboost-program-options-dev libmicrohttpd-dev libfmt-dev pybind11-dev
