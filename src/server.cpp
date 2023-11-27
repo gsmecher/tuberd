@@ -124,6 +124,10 @@ static void showwarning(py::object message,
 			py::object lineno,
 			py::object file,
 			py::object line) {
+
+	if(verbose & Verbose::NOISY)
+		fmt::print(stderr, "... captured warning '{}'\n", py::str(message).cast<std::string>());
+
 	warning_list.push_back(py::str(message).cast<std::string>());
 }
 
@@ -178,19 +182,23 @@ static py::dict tuber_server_invoke(py::dict &registry,
 
 		/* Dispatch to Python - failures emerge as exceptions */
 		timed_scope ts("Python dispatch");
-		py::object response = m(*python_args, **python_kwargs);
+		py::object response = py::none();
+		try {
+			response = py::dict("result"_a=m(*python_args, **python_kwargs));
+		} catch(std::exception &e) {
+			response = error_response(e.what());
+		}
+
+		/* Capture warnings, if any */
+		if(!warning_list.empty()) {
+			response["warnings"] = warning_list;
+			warning_list.clear();
+		}
 
 		if(verbose & Verbose::NOISY)
 			fmt::print(stderr, "... response was {}\n", json_dumps(response));
 
-		/* Cast back to JSON, wrap in a result object, and return */
-		if(!warning_list.empty()) {
-			py::list warnings = py::cast(warning_list);
-			warning_list.clear();
-			return py::dict("result"_a=response, "warnings"_a=warnings);
-		}
-
-		return py::dict("result"_a=response);
+		return response;
 	}
 
 	if(verbose & Verbose::NOISY)
@@ -250,19 +258,27 @@ class DLL_LOCAL tuber_resource : public http_resource {
 					 * list to have the expected size. */
 					py::list result(py::len(request_list));
 
-					for(size_t i=0; i<result.size(); i++)
+					bool early_bail = false;
+					for(size_t i=0; i<result.size(); i++) {
+						/* If something went wrong earlier in the loop, don't execute anything else. */
+						if(early_bail) {
+							result[i] = error_response("Something went wrong in a preceding call.");
+							continue;
+						}
+
 						try {
 							result[i] = tuber_server_invoke(reg, request_list[i], json_loads, json_dumps);
 						} catch(std::exception &e) {
+							/* Indicates an internal error - this does not normally happen */
 							result[i] = error_response(e.what());
-							if(verbose & Verbose::NOISY)
-								fmt::print("Exception path response: {}\n", json_dumps(result[i]));
-
-							/* Flag subsequent calls as failures, too. This also exits
-							 * the loop without dispatching anything else. */
-							for(i++; i<result.size(); i++)
-								result[i] = error_response("Something went wrong in a preceding call.");
+							early_bail = true;
 						}
+
+						if(result[i].contains("error")) {
+							/* Indicates client code flagged an error - this is a nominal code path */
+							early_bail = true;
+						}
+					}
 
 					timed_scope ts("Happy-path JSON serialization");
 

@@ -76,6 +76,7 @@ class NumPy:
 
 class WarningsClass:
     def single_warning(self, warning_text, error=False):
+        warnings.resetwarnings() # ensure no filters
         warnings.warn(warning_text)
 
         if error:
@@ -84,6 +85,7 @@ class WarningsClass:
         return True
 
     def multiple_warnings(self, warning_count=1, error=False):
+        warnings.resetwarnings() # ensure no filters
         for n in range(warning_count):
             warnings.warn(f"Warning {n+1}")
 
@@ -242,56 +244,6 @@ def test_numpy_types(tuber_call):
     assert tuber_call(object="NumPy", method="returns_numpy_array") == Succeeded([0, 1, 2, 3])
 
 #
-# Warnings tests
-#
-
-def test_warnings(tuber_call):
-    # Does 1 warning work?
-    assert tuber_call(object="Warnings",
-                      method="single_warning",
-                      kwargs=dict(warning_text="This is a single warning.")) == Succeeded(
-            True,
-            warnings=["This is a single warning."]
-    )
-
-    # Does it work twice?
-    assert tuber_call(object="Warnings",
-                      method="single_warning",
-                      kwargs=dict(warning_text="This is another single warning.")) == Succeeded(
-            True,
-            warnings=["This is another single warning."]
-    )
-
-    # Do several?
-    assert tuber_call(object="Warnings", method="multiple_warnings",
-                      kwargs=dict(warning_count=5)) == Succeeded(
-            True,
-            warnings=["Warning 1",
-                      "Warning 2",
-                      "Warning 3",
-                      "Warning 4",
-                      "Warning 5"],
-    )
-
-    # Try warnings combined with errors
-    #assert tuber_call(object="Warnings",
-    #                  method="single_warning",
-    #                  kwargs=dict(warning_text="This is a single warning.", error=True)) == Succeeded(
-    #        True,
-    #        warnings=["This is a single warning."]
-    #)
-
-    #assert tuber_call(object="Warnings", method="multiple_warnings",
-    #                  kwargs=dict(warning_count=5), error=True) == Succeeded(
-    #        True,
-    #        warnings=["Warning 1",
-    #                  "Warning 2",
-    #                  "Warning 3",
-    #                  "Warning 4",
-    #                  "Warning 5"],
-    #)
-
-#
 # pybind11 wrappers
 #
 
@@ -433,7 +385,8 @@ async def test_tuberpy_session_cache(tuber_call):
     aiohttp.ClientSession = None  # break ClientSession instantiation
     await s.increment([4, 5, 6])
     importlib.reload(aiohttp)
-    assert aiohttp.ClientSession  # make sure we fixed it
+    # ensure we fixed it.
+    assert aiohttp.ClientSession  # type: ignore[truthy-function]
 
 
 @pytest.mark.asyncio
@@ -488,7 +441,6 @@ async def test_tuberpy_unserializable(tuber_call):
         await s.unserializable()
 
 
-@pytest.mark.xfail
 @pytest.mark.asyncio
 async def test_tuberpy_async_context_with_unserializable(tuber_call):
     """Ensure exceptions in a sequence of calls show up as expected."""
@@ -505,3 +457,22 @@ async def test_tuberpy_async_context_with_unserializable(tuber_call):
 
     with pytest.raises(tuber.TuberRemoteError):
         await r3
+
+@pytest.mark.asyncio
+async def test_tuberpy_warnings(tuber_call):
+    """Ensure warnings are captured"""
+    s = await tuber.resolve("Warnings", TUBERD_HOSTNAME)
+
+    # Single, simple warning
+    with pytest.warns(match="This is a warning"):
+        await s.single_warning("This is a warning")
+
+    # Several in a row
+    with pytest.warns() as ws:
+        await s.multiple_warnings(warning_count=5)
+        assert len(ws) == 5
+
+    # Check with exceptions
+    with pytest.raises(tuber.TuberRemoteError), \
+            pytest.warns(match="This is a warning"):
+        await s.single_warning("This is a warning", error=True)
