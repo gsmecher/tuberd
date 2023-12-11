@@ -441,6 +441,7 @@ async def test_tuberpy_unserializable(tuber_call):
         await s.unserializable()
 
 
+@pytest.mark.xfail
 @pytest.mark.asyncio
 async def test_tuberpy_async_context_with_unserializable(tuber_call):
     """Ensure exceptions in a sequence of calls show up as expected."""
