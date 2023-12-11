@@ -13,6 +13,7 @@ import test_module as tm
 import textwrap
 import tuber
 import weakref
+import warnings
 
 from requests.packages.urllib3.util.retry import Retry
 
@@ -73,6 +74,25 @@ class NumPy:
     def returns_numpy_array(self):
         return np.array([0, 1, 2, 3])
 
+class WarningsClass:
+    def single_warning(self, warning_text, error=False):
+        warnings.resetwarnings() # ensure no filters
+        warnings.warn(warning_text)
+
+        if error:
+            raise RuntimeError("Oops!")
+
+        return True
+
+    def multiple_warnings(self, warning_count=1, error=False):
+        warnings.resetwarnings() # ensure no filters
+        for n in range(warning_count):
+            warnings.warn(f"Warning {n+1}")
+
+        if error:
+            raise RuntimeError("Oops!")
+
+        return True
 
 registry = {
     "NullObject": NullObject(),
@@ -80,6 +100,7 @@ registry = {
     "ObjectWithProperty": ObjectWithProperty(),
     "Types": Types(),
     "NumPy": NumPy(),
+    "Warnings": WarningsClass(),
     "Wrapper": tm.Wrapper(),
 }
 
@@ -149,13 +170,19 @@ def tuber_call(tuberd):
     yield tuber_call
 
 
-def Succeeded(args=None, **kwargs):
+def Succeeded(args=None, warnings=None, **kwargs):
     """Wrap a return value for a successful call in its JSON-RPC wrapper"""
+    if warnings is not None:
+        return dict(result=kwargs or args, warnings=warnings)
+
     return dict(result=kwargs or args)
 
 
-def Failed(**kwargs):
+def Failed(warnings=None, **kwargs):
     """Wrap a return value for an error in its JSON-RPC wrapper"""
+    if warnings is not None:
+        return dict(error=kwargs, warnings=warnings)
+
     return dict(error=kwargs)
 
 
@@ -216,11 +243,13 @@ def test_function_types_with_correct_argument_types(tuber_call):
 def test_numpy_types(tuber_call):
     assert tuber_call(object="NumPy", method="returns_numpy_array") == Succeeded([0, 1, 2, 3])
 
-
 #
 # pybind11 wrappers
 #
 
+    assert tuber_call(object="Types", method="string_function", args=["this is a string"]) == Succeeded(
+        "this is a string"
+    )
 
 @pytest.mark.orjson
 def test_double_vector(tuber_call):
@@ -356,7 +385,8 @@ async def test_tuberpy_session_cache(tuber_call):
     aiohttp.ClientSession = None  # break ClientSession instantiation
     await s.increment([4, 5, 6])
     importlib.reload(aiohttp)
-    assert aiohttp.ClientSession  # make sure we fixed it
+    # ensure we fixed it.
+    assert aiohttp.ClientSession  # type: ignore[truthy-function]
 
 
 @pytest.mark.asyncio
@@ -428,3 +458,22 @@ async def test_tuberpy_async_context_with_unserializable(tuber_call):
 
     with pytest.raises(tuber.TuberRemoteError):
         await r3
+
+@pytest.mark.asyncio
+async def test_tuberpy_warnings(tuber_call):
+    """Ensure warnings are captured"""
+    s = await tuber.resolve("Warnings", TUBERD_HOSTNAME)
+
+    # Single, simple warning
+    with pytest.warns(match="This is a warning"):
+        await s.single_warning("This is a warning")
+
+    # Several in a row
+    with pytest.warns() as ws:
+        await s.multiple_warnings(warning_count=5)
+        assert len(ws) == 5
+
+    # Check with exceptions
+    with pytest.raises(tuber.TuberRemoteError), \
+            pytest.warns(match="This is a warning"):
+        await s.single_warning("This is a warning", error=True)

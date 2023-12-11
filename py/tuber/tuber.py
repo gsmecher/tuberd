@@ -17,10 +17,10 @@ import weakref
 try:
     import simplejson as json
 except ModuleNotFoundError:
-    import json
+    import json  # type: ignore[no-redef]
 
 
-async def resolve(objname, hostname):
+async def resolve(objname: str, hostname: str):
     """Create a local reference to a networked resource.
 
     This is the recommended way to connect to remote tuberd instances.
@@ -36,7 +36,7 @@ async def resolve(objname, hostname):
 # way to avoid carrying around global state, and requiring that state be
 # consistent with whatever event loop is running in whichever context it's
 # used. See https://docs.aiohttp.org/en/stable/faq.html
-_clientsession = weakref.WeakKeyDictionary()
+_clientsession: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 
 
 class TuberError(Exception):
@@ -150,8 +150,8 @@ class Context(object):
         results = []
         for f, r in zip(futures, json_out):
             # Always emit warnings, if any occurred
-            if hasattr(r, "warning") and r.warning:
-                for w in r.warning:
+            if hasattr(r, "warnings") and r.warnings:
+                for w in r.warnings:
                     warnings.warn(w)
 
             # Resolve either a result or an error
