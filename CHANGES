@@ -1,0 +1,75 @@
+Version 0.7
+===========
+
+Released 2023-12-11
+
+* New features:
+
+  - Added support for warnings.warn calls in server-side code - these are
+    propagated through a "warnings" field in the result object and bubbled up
+    as client-side warnings.
+
+Version 0.6
+===========
+
+Released 2023-02-24
+
+* Fixes:
+
+  - Acquire GIL earlier in response scope, outside "try" block.  Otherwise, the
+    exception path occurs outside the GIL block, and it's not valid to use
+    json_dumps to emit error messages. Fixes a segfault when invalid JSON is
+    supplied.
+
+Version 0.5
+===========
+
+Released 2022-05-24
+
+* Fixes:
+
+  - Correct preamble install path.
+
+Version 0.4
+===========
+
+Released 2022-04-14
+
+* Features:
+
+  - Adds --orjson-with-numpy extension to enable orjson fast-path. This
+    serializer offers significant performance gains, especially when using
+    numpy objects.
+
+Version 0.3
+===========
+
+Released 2022-04-07
+
+* Features:
+
+  - Adds option for use of user-specified JSON module.
+
+Version 0.2
+===========
+
+Released 2022-04-06
+
+* Features:
+
+  - Removes dependency on nlohmann::json. The JSON dependency is intended to
+    speed up serialization. The Python-native JSON serializer is implemented in
+    C under the hood, and should be better able to avoid casual
+    copy-conversions of arguments and results.
+
+  - Adds Python test framework. The test framework is a starting point (it does not exercise unhappy
+    paths or argument variations right now.)
+
+Version 0.1
+===========
+
+Released 2022-04-03
+
+* Features:
+
+   - Initial release.
