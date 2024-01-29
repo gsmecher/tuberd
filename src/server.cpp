@@ -28,7 +28,7 @@ struct fmt::formatter<T, std::enable_if_t<std::is_base_of<py::object, T>::value,
 
 	template <typename FormatContext>
 	auto format(py::object const& o, FormatContext& ctx) {
-		return fmt::formatter<std::string>::format(py::str(o), ctx);
+		return fmt::formatter<std::string>::format((std::string)py::str(o), ctx);
 	}
 };
 
