@@ -222,7 +222,7 @@ class DLL_LOCAL tuber_resource : public http_resource {
 			json_loads(json_loads),
 			json_dumps(json_dumps) {};
 
-		const std::shared_ptr<http_response> render(const http_request& req) {
+		std::shared_ptr<http_response> render(const http_request& req) {
 			/* Acquire the GIL. This makes us thread-safe -
 			 * but any methods we invoke should release the
 			 * GIL (especially if they do their own
@@ -235,7 +235,8 @@ class DLL_LOCAL tuber_resource : public http_resource {
 					fmt::print(stderr, "Request: {}\n", req.get_content());
 
 				/* Parse JSON */
-				py::object request_obj = json_loads(req.get_content());
+				std::string content(req.get_content());
+				py::object request_obj = json_loads(content);
 
 				if(py::isinstance<py::dict>(request_obj)) {
 					/* Simple JSON object - invoke it and return the results. */
@@ -313,7 +314,7 @@ class DLL_LOCAL file_resource : public http_resource {
 	public:
 		file_resource(fs::path webroot, int max_age) : webroot(webroot), max_age(max_age) {};
 
-		const std::shared_ptr<http_response> render_GET(const http_request& req) {
+		std::shared_ptr<http_response> render_GET(const http_request& req) {
 			/* Start with webroot and append path segments from
 			 * HTTP request.
 			 *
