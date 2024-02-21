@@ -3,7 +3,7 @@
 #include <filesystem>
 #include <chrono>
 #include <queue>
-#include <boost/program_options.hpp>
+#include <getopt.h>
 
 #include <httpserver.hpp>
 #include <httpserver/http_utils.hpp>
@@ -19,7 +19,6 @@ using namespace pybind11::literals;
 
 using namespace httpserver;
 
-namespace po = boost::program_options;
 namespace fs = std::filesystem;
 
 /* Formatter for Python objects */
@@ -364,62 +363,89 @@ static void sigint(int signo) {
 		ws->stop();
 }
 
+/* pretty print CLI options */
+#define PRINTOPT(o, h) \
+  "  " << o << "\n      " << h << "\n"
+#define PRINTOPT2(o, h, d) \
+  "  " << o << "\n      " << h << " (default: " << d << ")\n"
+
 int main(int argc, char **argv) {
 	/*
 	 * Parse command-line arguments
 	 */
 
-	int port;
-	int max_age;
-	bool orjson_with_numpy=false;
-	std::string preamble, registry, webroot;
-	std::string json_module;
+	int port = 80;
+	int max_age = 3600;
+	int orjson_with_numpy = 0;
+	std::string preamble = "/usr/share/tuberd/preamble.py";
+	std::string registry = "/usr/share/tuberd/registry.py";
+	std::string webroot = "/var/www/";
+	std::string json_module = "json";
 
-	po::options_description desc("tuberd");
-	desc.add_options()
-		("help,h", "produce help message")
+	const option long_opts[] = {
+		{"orjson-with-numpy", no_argument, &orjson_with_numpy, 1},
+		{"max-age", required_argument, nullptr, 'a'},
+		{"json", required_argument, nullptr, 'j'},
+		{"port", required_argument, nullptr, 'p'},
+		{"preamble", required_argument, nullptr, 'm'},
+		{"registry", required_argument, nullptr, 'r'},
+		{"webroot", required_argument, nullptr, 'w'},
+		{"verbose", required_argument, nullptr, 'v'},
+		{"help", no_argument, nullptr, 'h'},
+		{nullptr, no_argument, nullptr, 0}
+	};
 
-		("max-age",
-		 po::value<int>(&max_age)->default_value(3600),
-		 "maximum cache residency for static (file) assets")
+	while (true) {
+		const auto c = getopt_long(argc, argv, "j:p:w:v:h", long_opts, nullptr);
+		if (c == -1)
+			break;
 
-		("json,j",
-		 po::value<std::string>(&json_module)->default_value("json"),
-		 "Python JSON module to use for serialization/deserialization")
-
-		("orjson-with-numpy",
-		 po::bool_switch(&orjson_with_numpy)->default_value(false),
-		 "Use ORJSON module with fast NumPy serialization support")
-
-		("port,p",
-		 po::value<int>(&port)->default_value(80),
-		 "port")
-
-		("preamble",
-		 po::value<std::string>(&preamble)->default_value("/usr/share/tuberd/preamble.py"),
-		 "location of slow-path Python code")
-
-		("registry",
-		 po::value<std::string>(&registry)->default_value("/usr/share/tuberd/registry.py"),
-		 "location of registry Python code")
-
-		("webroot,w",
-		 po::value<std::string>(&webroot)->default_value("/var/www/"),
-		 "location to serve static content")
-
-		("verbose,v",
-		 po::value<Verbose>(&verbose),
-		 "verbosity (default: 0)")
-
-		;
-
-	po::variables_map vm;
-	po::store(po::parse_command_line(argc, argv, desc), vm);
-	po::notify(vm);
-
-	if(vm.count("help")) {
-		std::cout << desc << std::endl;
-		return 1;
+		switch (c) {
+		case 0:
+			break;
+		case 'a':
+			max_age = std::stoi(optarg);
+			break;
+		case 'j':
+			json_module = std::string(optarg);
+			break;
+		case 'p':
+			port = std::stoi(optarg);
+			break;
+		case 'm':
+			preamble = std::string(optarg);
+			break;
+		case 'r':
+			registry = std::string(optarg);
+			break;
+		case 'w':
+			webroot = std::string(optarg);
+			break;
+		case 'v':
+			verbose = static_cast<Verbose>(std::stoi(optarg));
+			break;
+		case 'h':
+		case '?':
+		default:
+			std::cout << "Usage: " << argv[0] << " [options]\n\nOptions:\n"
+			    << PRINTOPT("-h [ --help ]", "produce help message")
+			    << PRINTOPT2("--max-age N",
+			    "maximum cache residency for static (file) assets", max_age)
+			    << PRINTOPT2("-j [ --json ] NAME",
+			    "Python JSON module to use for serialization/deserialization",
+			    json_module)
+			    << PRINTOPT("--orjson-with-numpy",
+			    "use ORJSON module with fast NumPy serialization support")
+			    << PRINTOPT2("-p [ --port ] PORT", "port", port)
+			    << PRINTOPT2("--preamble PATH",
+			    "location of slow-path Python code", preamble)
+			    << PRINTOPT2("--registry PATH",
+			    "location of registry Python code", registry)
+			    << PRINTOPT2("-w [ --webroot ] PATH",
+			    "location to serve static content", webroot)
+			    << PRINTOPT2("-v [ --verbose ] N", "verbosity", (int)verbose);
+			return 1;
+		}
 	}
 
 	/*
