@@ -18,7 +18,8 @@ class Wrapper {
 		bool is_y(Kind const& k) const { return k == Kind::Y; }
 
 		std::vector<int> increment(std::vector<int> x) {
-			std::ranges::for_each(x, [](int &n) { n++; });
+			for (auto &i : x)
+				i++;
 			return x;
 		};
 };
