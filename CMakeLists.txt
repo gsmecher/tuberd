@@ -12,7 +12,6 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++20")
 list(APPEND CMAKE_MODULE_PATH "/usr/local/share/cmake/Modules")
 
 find_package(Python COMPONENTS Interpreter Development)
-find_package(Boost REQUIRED program_options)
 find_package(fmt REQUIRED)
 find_package(LibHttpServer MODULE REQUIRED)
 find_package(pybind11 REQUIRED)
@@ -20,7 +19,7 @@ find_package(pybind11 REQUIRED)
 include(CTest)
 
 add_executable(tuberd src/server.cpp)
-target_link_libraries(tuberd PRIVATE Boost::program_options fmt::fmt ${LIBHTTPSERVER_LIBRARIES} pybind11::embed)
+target_link_libraries(tuberd PRIVATE fmt::fmt ${LIBHTTPSERVER_LIBRARIES} pybind11::embed)
 
 pybind11_add_module(test_module MODULE tests/test_module.cpp)
 target_include_directories(test_module PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
