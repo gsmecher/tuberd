@@ -365,9 +365,9 @@ static void sigint(int signo) {
 
 /* pretty print CLI options */
 #define PRINTOPT(o, h) \
-  "  " << o << "\n      " << h << "\n"
+  fmt::print("  {}\n      {}\n", o, h)
 #define PRINTOPT2(o, h, d) \
-  "  " << o << "\n      " << h << " (default: " << d << ")\n"
+  fmt::print("  {}\n      {} (default: {})\n", o, h, d)
 
 int main(int argc, char **argv) {
 	/*
@@ -427,23 +427,23 @@ int main(int argc, char **argv) {
 		case 'h':
 		case '?':
 		default:
-			std::cout << "Usage: " << argv[0] << " [options]\n\nOptions:\n"
-			    << PRINTOPT("-h [ --help ]", "produce help message")
-			    << PRINTOPT2("--max-age N",
-			    "maximum cache residency for static (file) assets", max_age)
-			    << PRINTOPT2("-j [ --json ] NAME",
+			fmt::print("Usage: {} [options]\n\nOptions:\n", argv[0]);
+			PRINTOPT("-h [ --help ]", "produce help message");
+			PRINTOPT2("--max-age N",
+			    "maximum cache residency for static (file) assets", max_age);
+			PRINTOPT2("-j [ --json ] NAME",
 			    "Python JSON module to use for serialization/deserialization",
-			    json_module)
-			    << PRINTOPT("--orjson-with-numpy",
-			    "use ORJSON module with fast NumPy serialization support")
-			    << PRINTOPT2("-p [ --port ] PORT", "port", port)
-			    << PRINTOPT2("--preamble PATH",
-			    "location of slow-path Python code", preamble)
-			    << PRINTOPT2("--registry PATH",
-			    "location of registry Python code", registry)
-			    << PRINTOPT2("-w [ --webroot ] PATH",
-			    "location to serve static content", webroot)
-			    << PRINTOPT2("-v [ --verbose ] N", "verbosity", (int)verbose);
+			    json_module);
+			PRINTOPT("--orjson-with-numpy",
+			    "use ORJSON module with fast NumPy serialization support");
+			PRINTOPT2("-p [ --port ] PORT", "port", port);
+			PRINTOPT2("--preamble PATH", "location of slow-path Python code",
+			    preamble);
+			PRINTOPT2("--registry PATH", "location of registry Python code",
+			    registry);
+			PRINTOPT2("-w [ --webroot ] PATH",
+			    "location to serve static content", webroot);
+			PRINTOPT2("-v [ --verbose ] N", "verbosity", (int)verbose);
 			return 1;
 		}
 	}
