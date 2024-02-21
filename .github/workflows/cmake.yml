@@ -22,7 +22,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         repository: etr/libhttpserver
-        ref: 0.18.2
+        ref: 0.19.0
         path: libhttpserver
 
     - name: Install Python dependencies
