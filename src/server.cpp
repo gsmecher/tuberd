@@ -506,8 +506,6 @@ int main(int argc, char **argv) {
 	/* Create a registry */
 	py::dict reg = py::eval("registry");
 
-	py::gil_scoped_release release;
-
 	/*
 	 * Start webserver
 	 */
@@ -523,6 +521,8 @@ int main(int argc, char **argv) {
 	tr->disallow_all();
 	tr->set_allowing(MHD_HTTP_METHOD_POST, true);
 	ws->register_resource("/tuber", tr.get());
+
+	py::gil_scoped_release release;
 
 	/* If a valid webroot was provided, serve static content for other paths. */
 	try {
