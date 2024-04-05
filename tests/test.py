@@ -419,16 +419,24 @@ async def test_tuberpy_async_context_with_kwargs(tuber_call):
 async def test_tuberpy_async_context_with_exception(tuber_call):
     """Ensure exceptions in a sequence of calls show up as expected."""
     s = await tuber.resolve("Wrapper", TUBERD_HOSTNAME)
-    async with s.tuber_context() as ctx:
-        r1 = ctx.increment([1, 2, 3])  # fine
-        r2 = ctx.increment(4)  # wrong type
-        r3 = ctx.increment([5, 6, 6])  # shouldn't execute
 
+    with pytest.raises(tuber.TuberRemoteError):
+        async with s.tuber_context() as ctx:
+            r1 = ctx.increment([1, 2, 3])  # fine
+            r2 = ctx.increment(4)  # wrong type
+            r3 = ctx.increment([5, 6, 6])  # shouldn't execute
+
+            # execution happens when ctx falls out of scope - exception raised
+
+    # the first call should have succeeded
     await r1
 
+    # the second call generated the exception
     with pytest.raises(tuber.TuberRemoteError):
         await r2
 
+    # the third call should not have been executed (propagated here as an
+    # exception too)
     with pytest.raises(tuber.TuberRemoteError):
         await r3
 

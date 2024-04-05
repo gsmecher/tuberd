@@ -162,7 +162,7 @@ class Context(object):
                 f.set_result(r.result)
 
         # Return a list of results
-        return results
+        return [ await f for f in futures ]
 
     def __getattr__(self, name):
         if attribute_blacklisted(name):
