@@ -39,6 +39,19 @@ async def resolve(objname: str, hostname: str):
 _clientsession: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 
 
+# Normally, asyncio.ClientSessions in _clientsession are automatically garbage
+# collected when their event loops close. Sometimes that doesn't happen
+# (notably, in ipython) and an extra tidy-up step ensures no warnings when we
+# exit.
+def cleanup():
+    for l, cs in _clientsession.items():
+        if not l.is_closed():
+            l.call_soon(cs.close)
+
+
+atexit.register(cleanup)
+
+
 class TuberError(Exception):
     pass
 
