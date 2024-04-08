@@ -40,6 +40,11 @@ class ObjectWithProperty:
     PROPERTY = "expected property value"
 
 
+class ObjectWithPrivateMethod:
+    def __private_method(self):
+        raise RuntimeError("how did you get here?")
+
+
 class Types:
     # These properties can be accessed as properties, directly
     STRING = "this is a string property"
@@ -98,6 +103,7 @@ registry = {
     "NullObject": NullObject(),
     "ObjectWithMethod": ObjectWithMethod(),
     "ObjectWithProperty": ObjectWithProperty(),
+    "ObjectWithPrivateMethod": ObjectWithPrivateMethod(),
     "Types": Types(),
     "NumPy": NumPy(),
     "Warnings": WarningsClass(),
@@ -188,6 +194,13 @@ def Failed(warnings=None, **kwargs):
 
 def test_empty_request_array(tuber_call):
     assert tuber_call(json=[]) == []
+
+
+def test_describe(tuber_call):
+    assert tuber_call(json={}) == Succeeded(objects=list(registry))
+    assert tuber_call(object="ObjectWithPrivateMethod") == Succeeded(
+        __doc__=None, methods=[], properties=[]
+    )
 
 
 def test_fetch_null_metadata(tuber_call):
