@@ -4,14 +4,9 @@ Tuber object interface
 
 import aiohttp
 import asyncio
-import atexit
-import contextlib
-import socket
 import textwrap
 import types
-import urllib
 import warnings
-import weakref
 
 # Prefer SimpleJSON, but fall back on built-in
 try:
@@ -29,14 +24,6 @@ async def resolve(objname: str, hostname: str):
     instance = TuberObject(objname, f"http://{hostname}/tuber")
     await instance.tuber_resolve()
     return instance
-
-
-# Keep a mapping between event loops and client session objects, so we can
-# reuse clientsessions in an event-loop safe way. This is a slightly cheeky
-# way to avoid carrying around global state, and requiring that state be
-# consistent with whatever event loop is running in whichever context it's
-# used. See https://docs.aiohttp.org/en/stable/faq.html
-_clientsession: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 
 
 class TuberError(Exception):
@@ -127,10 +114,24 @@ class Context(object):
             return []
 
         loop = asyncio.get_running_loop()
-        try:
-            cs = _clientsession[loop]
-        except KeyError as e:
-            _clientsession[loop] = cs = aiohttp.ClientSession(json_serialize=json.dumps)
+        if not hasattr(loop, "_tuber_session"):
+            # Monkey-patch tuber session memory handling with the running event loop
+            loop._tuber_session = aiohttp.ClientSession(json_serialize=json.dumps)
+
+            # Ensure that ClientSession.close() is called when the loop is
+            # closed.  ClientSession.__del__ does not close the session, so it
+            # is not sufficient to simply attach the session to the loop to
+            # ensure garbage collection.
+            loop_close = loop.close
+            def close(self):
+                if hasattr(self, "_tuber_session"):
+                    if not self.is_closed():
+                        self.run_until_complete(self._tuber_session.close())
+                    del self._tuber_session
+                loop_close()
+            loop.close = types.MethodType(close, loop)
+
+        cs = loop._tuber_session
 
         # Create a HTTP request to complete the call. This is a coroutine,
         # so we queue the call and then suspend execution (via 'yield')
