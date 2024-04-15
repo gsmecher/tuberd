@@ -7,10 +7,11 @@ import asyncio
 from collections.abc import Mapping
 import textwrap
 import types
+from typing import List, Dict, Tuple
 import warnings
 
 
-async def resolve(objname: str, hostname: str, accept_types: None):
+async def resolve(objname: str, hostname: str, accept_types: List[str] | None = None):
     """Create a local reference to a networked resource.
 
     This is the recommended way to connect to remote tuberd instances.
@@ -107,11 +108,11 @@ class Context(object):
     up to reduce roundtrips.
     """
 
-    def __init__(self, obj, accept_types: None, **ctx_kwargs):
-        self.calls = []
+    def __init__(self, obj: str, accept_types: List[str] | None = None, **ctx_kwargs):
+        self.calls: List[Tuple[Dict,asyncio.Future]] = []
         self.obj = obj
         if accept_types is None:
-            self.accept_types = AcceptTypes.keys()
+            self.accept_types = list(AcceptTypes.keys())
         else:
             for accept_type in accept_types:
                 if accept_type not in AcceptTypes.keys():
@@ -249,7 +250,7 @@ class TuberObject:
     To use it, you should subclass this TuberObject.
     """
 
-    def __init__(self, objname, uri, accept_types: None):
+    def __init__(self, objname: str, uri: str, accept_types: List[str] | None = None):
         self._tuber_objname = objname
         self._tuber_uri = uri
         self._accept_types = accept_types
