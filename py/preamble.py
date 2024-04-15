@@ -30,6 +30,21 @@ def error_response(message):
     return {"error": {"message": message}}
 
 
+def wrap_bytes_for_json(obj):
+    '''
+    JSON cannot (natively) encode bytes, so we provide a simple encoding for them.
+    This allows uniformity when using either JSON or binary formats (CBOR, etc.)
+    which do have native binary support. The JSON encoding is not meant to be
+    especially efficient, since anyone wanting seriously move around significant
+    amounts of binary data should use another format, but it provides a
+    consistent, readable/debuggable, fall-back.
+    '''
+    if isinstance(obj, bytes):
+        data = [int(v) for v in obj]
+        return {"bytes": data}
+    return obj
+
+
 def describe(registry, request):
     '''
     Tuber slow path

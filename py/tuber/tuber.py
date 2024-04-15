@@ -4,24 +4,19 @@ Tuber object interface
 
 import aiohttp
 import asyncio
+from collections.abc import Mapping
 import textwrap
 import types
 import warnings
 
-# Prefer SimpleJSON, but fall back on built-in
-try:
-    import simplejson as json
-except ModuleNotFoundError:
-    import json  # type: ignore[no-redef]
 
-
-async def resolve(objname: str, hostname: str):
+async def resolve(objname: str, hostname: str, accept_types: None):
     """Create a local reference to a networked resource.
 
     This is the recommended way to connect to remote tuberd instances.
     """
 
-    instance = TuberObject(objname, f"http://{hostname}/tuber")
+    instance = TuberObject(objname, f"http://{hostname}/tuber", accept_types=accept_types)
     await instance.tuber_resolve()
     return instance
 
@@ -52,7 +47,39 @@ class TuberResult:
         return repr(self.__dict__)
 
 
-_json_loads = json.JSONDecoder(object_hook=TuberResult).decode
+# This variable is used to track the media types we are able to decode, mapping their names to
+# decoding functions. The interface of the decoding function is to take two arguments: a bytes-like
+# object containing the encoded data, and an encoding name (which may be None) given by the
+# character set information (if any) included in the Content-Type header attached to the data.
+AcceptTypes = {}
+
+# Prefer SimpleJSON, but fall back on built-in
+try:
+    import simplejson as json
+except ModuleNotFoundError:
+    import json  # type: ignore[no-redef]
+def decode_json(response_data, encoding):
+    if encoding is None:  # guess the typical default if unspecified
+        encoding = "utf-8"
+    def ohook(obj):
+        if isinstance(obj, Mapping) and "bytes" in obj \
+          and (len(obj) == 1 or (len(obj) == 2 and "subtype" in obj)):
+            try:
+                return bytes(obj["bytes"])
+            except e as ValueError:
+                pass
+        return TuberResult(obj)
+    return json.JSONDecoder(object_hook=ohook).decode(response_data.decode(encoding))
+AcceptTypes["application/json"] = decode_json
+
+# Use cbor2 to handle CBOR, if available
+try:
+    import cbor2 as cbor
+    def decode_cbor(response_data, encoding):
+        return cbor.loads(response_data, object_hook=lambda dec,data: TuberResult(data))
+    AcceptTypes["application/cbor"] = decode_cbor
+except:
+    pass
 
 
 def attribute_blacklisted(name):
@@ -80,9 +107,16 @@ class Context(object):
     up to reduce roundtrips.
     """
 
-    def __init__(self, obj, **ctx_kwargs):
+    def __init__(self, obj, accept_types: None, **ctx_kwargs):
         self.calls = []
         self.obj = obj
+        if accept_types is None:
+            self.accept_types = AcceptTypes.keys()
+        else:
+            for accept_type in accept_types:
+                if accept_type not in AcceptTypes.keys():
+                    raise ValueError(f"Unsupported accept type: {accept_type}")
+            self.accept_types = accept_types
         self.ctx_kwargs = ctx_kwargs
 
     async def __aenter__(self):
@@ -133,11 +167,25 @@ class Context(object):
 
         cs = loop._tuber_session
 
+        # Declare the media types we want to allow getting back
+        headers={"Accept":", ".join(self.accept_types)}
         # Create a HTTP request to complete the call. This is a coroutine,
         # so we queue the call and then suspend execution (via 'yield')
         # until it's complete.
-        async with cs.post(self.obj._tuber_uri, json=calls) as resp:
-            json_out = await resp.json(loads=_json_loads, content_type=None)
+        async with cs.post(self.obj._tuber_uri, json=calls, headers=headers) as resp:
+            raw_out = await resp.read()
+            if not resp.ok:
+                try:
+                    text = raw_out.decode(resp.charset or "utf-8")
+                except Exception as ex:
+                    raise TuberRemoteError(f"Request failed with status {resp.status}")
+                raise TuberRemoteError(f"Request failed with status {resp.status}: {text}")
+            content_type = resp.content_type
+            # Check that the resulting media type is one which can actually be handled;
+            # this is slightly more liberal than checking that it is really among those we declared
+            if content_type not in AcceptTypes:
+                raise TuberError("Unexpected response content type: "+content_type)
+            json_out = AcceptTypes[content_type](raw_out, resp.charset)
 
         if hasattr(json_out, "error"):
             # Oops - this is actually a server-side error that bubbles
@@ -157,10 +205,16 @@ class Context(object):
 
             # Resolve either a result or an error
             if hasattr(r, "error") and r.error:
-                f.set_exception(TuberRemoteError(r.error.message))
+                if hasattr(r.error, "message"):
+                    f.set_exception(TuberRemoteError(r.error.message))
+                else:
+                    f.set_exception(TuberRemoteError("Unknown error"))
             else:
-                results.append(r.result)
-                f.set_result(r.result)
+                if hasattr(r, "result"):
+                    results.append(r.result)
+                    f.set_result(r.result)
+                else:
+                    f.set_exception(TuberError("Result has no 'result' attribute"))
 
         # Return a list of results
         return [ await f for f in futures ]
@@ -195,12 +249,13 @@ class TuberObject:
     To use it, you should subclass this TuberObject.
     """
 
-    def __init__(self, objname, uri):
+    def __init__(self, objname, uri, accept_types: None):
         self._tuber_objname = objname
         self._tuber_uri = uri
+        self._accept_types = accept_types
 
     def tuber_context(self, **kwargs):
-        return Context(self, **kwargs)
+        return Context(self, accept_types=self._accept_types, **kwargs)
 
     @property
     def __doc__(self):

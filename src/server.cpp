@@ -1,8 +1,13 @@
-#include <iostream>
+#include <chrono>
 #include <csignal>
 #include <filesystem>
-#include <chrono>
+#include <iostream>
+#include <map>
 #include <queue>
+#include <sstream>
+#include <string>
+#include <vector>
+
 #include <getopt.h>
 
 #include <httpserver.hpp>
@@ -31,8 +36,13 @@ struct fmt::formatter<T, std::enable_if_t<std::is_base_of<py::object, T>::value,
 	}
 };
 
-using json_loads_t = std::function<py::object(std::string)>;
-using json_dumps_t = std::function<std::string(py::object)>;
+struct Codec{
+	using loads_t = std::function<py::object(std::string)>;
+	using dumps_t = std::function<std::string(py::object)>;
+
+	loads_t loads;
+	dumps_t dumps;
+};
 
 #define DLL_LOCAL __attribute__((visibility("hidden")))
 
@@ -83,6 +93,7 @@ class timed_scope {
 
 /* MIME types */
 static const std::string MIME_JSON="application/json";
+static const std::string MIME_CBOR="application/cbor";
 static const std::string MIME_DEFAULT="text/plain";
 
 static const std::map<std::string, std::string> MIME_TYPES = {
@@ -92,6 +103,7 @@ static const std::map<std::string, std::string> MIME_TYPES = {
 	{".html",  "text/html"},
 	{".js",    "text/javascript"},
 	{".json",  MIME_JSON},
+	{".cbor",  MIME_CBOR},
 	/* No entry for .txt needed - it's the fallback case */
 
 	/* fonts */
@@ -130,10 +142,26 @@ static void showwarning(py::object message,
 	warning_list.push_back(py::str(message).cast<std::string>());
 }
 
+static std::vector<std::string> parseCommaSepList(std::string_view rawl){
+	//this makes no special effort to be efficient; it just copies strings all over
+	std::istringstream is(std::string{rawl});
+	std::vector<std::string> results;
+	std::string item;
+	while(is >> item){
+		if(item.empty())
+			continue;
+		else if(item.back()==',')
+			results.push_back(item.substr(0,item.size()-1));
+		else
+			results.push_back(item);
+	}
+	return results;
+}
+
 static py::dict tuber_server_invoke(py::dict &registry,
 		py::dict const& call,
-		json_loads_t const& json_loads,
-		json_dumps_t const& json_dumps) {
+		Codec::loads_t const& loads,
+		Codec::dumps_t const& dumps) {
 
 	timed_scope ts(__func__);
 
@@ -195,7 +223,7 @@ static py::dict tuber_server_invoke(py::dict &registry,
 		}
 
 		if(verbose & Verbose::NOISY)
-			fmt::print(stderr, "... response was {}\n", json_dumps(response));
+			fmt::print(stderr, "... response was {}\n", dumps(response));
 
 		return response;
 	}
@@ -214,12 +242,26 @@ static py::dict tuber_server_invoke(py::dict &registry,
  * Python (in the preamble). */
 class DLL_LOCAL tuber_resource : public http_resource {
 	public:
+		using CodecMap = std::map<std::string, Codec>;
 		tuber_resource(py::dict const& reg,
-				json_loads_t json_loads,
-				json_dumps_t json_dumps) :
+				const CodecMap& codecs) :
 			reg(reg),
-			json_loads(json_loads),
-			json_dumps(json_dumps) {};
+			codecs(codecs) {};
+
+		std::string determineResponseFormat(std::string_view accept, std::string_view requestFormat) {
+			if (accept.empty()) //If nothing specified, use what the client used
+				return std::string(requestFormat);
+			auto acceptedV = parseCommaSepList(accept);
+			for (const auto& accepted : acceptedV) {
+				if (codecs.count(accepted))
+					return std::string(accepted);
+			}
+			// If the client claims to accept anything, pick arbitrarily
+			if(std::find(acceptedV.begin(),acceptedV.end(),"*/*")!=acceptedV.end()
+			   || std::find(acceptedV.begin(),acceptedV.end(),"application/*")!=acceptedV.end())
+				return codecs.cbegin()->first;
+			throw std::runtime_error(fmt::format("Not able to encode any media type matching {}", accept));
+		}
 
 		std::shared_ptr<http_response> render(const http_request& req) {
 			/* Acquire the GIL. This makes us thread-safe -
@@ -229,25 +271,60 @@ class DLL_LOCAL tuber_resource : public http_resource {
 			 */
 			py::gil_scoped_acquire acquire;
 
+			CodecMap::const_iterator responseCodecIt;
+			std::string responseFormat;
+
+			// We assume that this cannot fail because JSON must always be available
+			auto setDefaultFormat = [&](){
+				responseFormat = MIME_JSON;
+				responseCodecIt = codecs.find(responseFormat);
+			};
+			setDefaultFormat();
+			auto encodeResponse = [&responseCodecIt](py::object value){
+				return responseCodecIt->second.dumps(value);
+			};
+
 			try {
 				if(verbose & Verbose::NOISY)
 					fmt::print(stderr, "Request: {}\n", req.get_content());
 
-				/* Parse JSON */
+				/* Figure out formats for request and response */
+				std::string requestFormat = std::string(req.get_header("Content-Type"));
+				if (requestFormat.empty()) // assume JSON if unspecified
+					requestFormat = MIME_JSON;
+				auto requestCodecIt = codecs.find(requestFormat);
+				if (requestCodecIt == codecs.end()){
+					std::string message = fmt::format("Not able to decode media type {}", requestFormat);
+					if(verbose & Verbose::NOISY)
+						fmt::print("Exception path response: {}\n", message);
+					return std::make_shared<string_response>(encodeResponse(error_response(message)), http::http_utils::http_ok, responseFormat);
+				}
+
+				responseFormat = determineResponseFormat(req.get_header("Accept"), requestFormat);
+				responseCodecIt = codecs.find(responseFormat);
+				if (responseCodecIt == codecs.end()){
+					std::string message = fmt::format("Not able to encode media type {}", responseFormat);
+					if(verbose & Verbose::NOISY)
+						fmt::print("Exception path response: {}\n", message);
+					setDefaultFormat();
+					return std::make_shared<string_response>(encodeResponse(error_response(message)), http::http_utils::http_ok, responseFormat);
+				}
+
+				/* Parse request */
 				std::string content(req.get_content());
-				py::object request_obj = json_loads(content);
+				py::object request_obj = requestCodecIt->second.loads(content);
 
 				if(py::isinstance<py::dict>(request_obj)) {
 					/* Simple JSON object - invoke it and return the results. */
 					py::object result;
 					try {
-						result = tuber_server_invoke(reg, request_obj, json_loads, json_dumps);
+						result = tuber_server_invoke(reg, request_obj, responseCodecIt->second.loads, responseCodecIt->second.dumps);
 					} catch(std::exception &e) {
 						result = error_response(e.what());
 						if(verbose & Verbose::NOISY)
-							fmt::print("Exception path response: {}\n", (std::string)(py::str)json_dumps(result));
+							fmt::print("Exception path response: {}\n", e.what());
 					}
-					return std::shared_ptr<http_response>(new string_response(json_dumps(result), http::http_utils::http_ok, MIME_JSON));
+					return std::shared_ptr<http_response>(new string_response(encodeResponse(result), http::http_utils::http_ok, responseFormat));
 
 				} else if(py::isinstance<py::list>(request_obj)) {
 					py::list request_list = request_obj;
@@ -267,7 +344,7 @@ class DLL_LOCAL tuber_resource : public http_resource {
 						}
 
 						try {
-							result[i] = tuber_server_invoke(reg, request_list[i], json_loads, json_dumps);
+							result[i] = tuber_server_invoke(reg, request_list[i], responseCodecIt->second.loads, responseCodecIt->second.dumps);
 						} catch(std::exception &e) {
 							/* Indicates an internal error - this does not normally happen */
 							result[i] = error_response(e.what());
@@ -280,28 +357,27 @@ class DLL_LOCAL tuber_resource : public http_resource {
 						}
 					}
 
-					timed_scope ts("Happy-path JSON serialization");
+					timed_scope ts("Happy-path serialization");
 
 					/* FIXME: serialization failure in an array call returns with an object structure! */
-					std::string result_json = json_dumps(result);
-					return std::shared_ptr<http_response>(new string_response(result_json, http::http_utils::http_ok, MIME_JSON));
+					std::string encoded_result = encodeResponse(result);
+					return std::shared_ptr<http_response>(new string_response(encoded_result, http::http_utils::http_ok, responseFormat));
 				}
 				else {
-					std::string error = json_dumps(error_response("Unexpected type in request."));
-					return std::shared_ptr<http_response>(new string_response(error, http::http_utils::http_ok, MIME_JSON));
+					std::string error = encodeResponse(error_response("Unexpected type in request."));
+					return std::shared_ptr<http_response>(new string_response(error, http::http_utils::http_ok, responseFormat));
 				}
 			} catch(std::exception const& e) {
 				if(verbose & Verbose::UNEXPECTED)
 					fmt::print(stderr, "Unhappy-path response {}\n", e.what());
 
-				std::string error = json_dumps(error_response(e.what()));
-				return std::shared_ptr<http_response>(new string_response(error, http::http_utils::http_ok, MIME_JSON));
+				std::string error = encodeResponse(error_response(e.what()));
+				return std::shared_ptr<http_response>(new string_response(error, http::http_utils::http_ok, responseFormat));
 			}
 		}
 	private:
 		py::dict reg;
-		json_loads_t json_loads;
-		json_dumps_t json_dumps;
+		const CodecMap& codecs;
 };
 
 /* Responder for files served out of the local filesystem.
@@ -475,9 +551,8 @@ int main(int argc, char **argv) {
 		return 3;
 	}
 
+	std::map<std::string, Codec> codecs;
 	/* Import JSON dumps function so we can use it */
-	json_loads_t json_loads;
-	json_dumps_t json_dumps;
 	try {
 		if(orjson_with_numpy)
 			json_module = "orjson";
@@ -486,21 +561,37 @@ int main(int argc, char **argv) {
 		py::module json = py::module::import(json_module.c_str());
 		py::object py_loads = json.attr("loads");
 		py::object py_dumps = json.attr("dumps");
+		py::object fix_bytes = py::eval("wrap_bytes_for_json");
 
-		json_loads = [py_loads](std::string s) { return py_loads(s); };
-		json_dumps = [py_dumps](py::object o) { return py_dumps(o).cast<std::string>(); };
+		Codec::loads_t json_loads = [py_loads](std::string s) { return py_loads(s); };
+		Codec::dumps_t json_dumps = [py_dumps, fix_bytes](py::object o) {
+			return py_dumps(o, py::arg("default")=fix_bytes).cast<std::string>();
+		};
 
 		/* If using orjson with NumPy, overload dumps with the right magic. */
 		if(orjson_with_numpy) {
 			py::object OPT_SERIALIZE_NUMPY = json.attr("OPT_SERIALIZE_NUMPY");
-			json_dumps = [py_dumps, OPT_SERIALIZE_NUMPY](py::object o) {
-				return py_dumps(o, std::nullopt, OPT_SERIALIZE_NUMPY).cast<std::string>();
+			json_dumps = [py_dumps, OPT_SERIALIZE_NUMPY, fix_bytes](py::object o) {
+				return py_dumps(o, fix_bytes, OPT_SERIALIZE_NUMPY).cast<std::string>();
 			};
 		}
+		codecs.emplace(MIME_JSON, Codec{json_loads, json_dumps});
 	} catch(std::exception const& e) {
 		fmt::print(stderr, "Unable to import loads/dumps from module {} ({})\n",
 				json_module, e.what());
 		return 4;
+	}
+
+	try{
+		py::module cbor = py::module::import("cbor2");
+		py::object py_loads = cbor.attr("loads");
+		py::object py_dumps = cbor.attr("dumps");
+		Codec::loads_t cbor_loads = [py_loads](std::string s) { return py_loads(s); };
+		Codec::dumps_t cbor_dumps = [py_dumps](py::object o) { return py_dumps(o).cast<std::string>(); };
+		codecs.emplace(MIME_CBOR, Codec{cbor_loads, cbor_dumps});
+	} catch(std::exception const& e) {
+		if(verbose & Verbose::NOISY)
+			fmt::print(stderr, "Could not import cbor2, CBOR will not be available: {}\n", e.what());
 	}
 
 	/* Create a registry */
@@ -517,7 +608,7 @@ int main(int argc, char **argv) {
 	std::signal(SIGINT, &sigint);
 
 	/* Set up /tuber endpoint */
-	tr = std::make_unique<tuber_resource>(reg, json_loads, json_dumps);
+	tr = std::make_unique<tuber_resource>(reg, codecs);
 	tr->disallow_all();
 	tr->set_allowing(MHD_HTTP_METHOD_POST, true);
 	ws->register_resource("/tuber", tr.get());
