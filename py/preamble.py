@@ -4,6 +4,8 @@ import os
 import sysconfig
 import site
 
+from tuber.codecs import wrap_bytes_for_json, cbor_augment_encode, cbor_tag_decode
+
 
 # Although upstream pybind11 allows user sites (check site.ENABLE_USER_SITE),
 # older versions did not.
