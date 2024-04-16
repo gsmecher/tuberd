@@ -12,6 +12,7 @@ import subprocess
 import test_module as tm
 import textwrap
 import tuber
+from tuber import codecs
 import weakref
 import warnings
 import cbor2
@@ -163,7 +164,7 @@ def tuber_call(request, tuberd):
         loads = json.loads
     elif request.param == "cbor":
         accept = "application/cbor"
-        loads = cbor2.loads
+        loads = lambda data: cbor2.loads(data, tag_hook=codecs.cbor_tag_decode)
 
     # The tuber daemon can take a little while to start (in particular, it
     # sources this script as a registry) - rather than adding a magic sleep to
@@ -264,7 +265,16 @@ def test_function_types_with_correct_argument_types(tuber_call):
 
 @pytest.mark.orjson
 def test_numpy_types(tuber_call):
-    assert tuber_call(object="NumPy", method="returns_numpy_array") == Succeeded([0, 1, 2, 3])
+    result = tuber_call(object="NumPy", method="returns_numpy_array")
+    # Attempting to compare the whole result object to its expected value does not work well if a
+    # numpy array is involved, becauase comparisons on the array will produce array results, and
+    # numpy insists that "The truth value of an array with more than one element is ambiguous"
+    # (even if all values in that array are the same), so we must use .all() to force a scalar
+    # truth value.
+    assert isinstance(result, dict)
+    assert len(result) == 1
+    assert "result" in result
+    assert (np.array([0, 1, 2, 3]) == result["result"]).all()
 
 #
 # pybind11 wrappers

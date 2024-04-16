@@ -4,6 +4,8 @@ import os
 import sysconfig
 import site
 
+from tuber.codecs import wrap_bytes_for_json, cbor_augment_encode, cbor_tag_decode
+
 
 # Although upstream pybind11 allows user sites (check site.ENABLE_USER_SITE),
 # older versions did not.
@@ -28,21 +30,6 @@ def error_response(message):
     Return an error message to the server to be raised by the client.
     """
     return {"error": {"message": message}}
-
-
-def wrap_bytes_for_json(obj):
-    '''
-    JSON cannot (natively) encode bytes, so we provide a simple encoding for them.
-    This allows uniformity when using either JSON or binary formats (CBOR, etc.)
-    which do have native binary support. The JSON encoding is not meant to be
-    especially efficient, since anyone wanting seriously move around significant
-    amounts of binary data should use another format, but it provides a
-    consistent, readable/debuggable, fall-back.
-    '''
-    if isinstance(obj, bytes):
-        data = [int(v) for v in obj]
-        return {"bytes": data}
-    return obj
 
 
 def describe(registry, request):

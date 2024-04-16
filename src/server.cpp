@@ -586,8 +586,14 @@ int main(int argc, char **argv) {
 		py::module cbor = py::module::import("cbor2");
 		py::object py_loads = cbor.attr("loads");
 		py::object py_dumps = cbor.attr("dumps");
-		Codec::loads_t cbor_loads = [py_loads](std::string s) { return py_loads(s); };
-		Codec::dumps_t cbor_dumps = [py_dumps](py::object o) { return py_dumps(o).cast<std::string>(); };
+		py::object extra_encode = py::eval("cbor_augment_encode");
+		py::object extra_decode = py::eval("cbor_tag_decode");
+		Codec::loads_t cbor_loads = [py_loads, extra_decode](std::string s) {
+			return py_loads(s, py::arg("tag_hook")=extra_decode);
+		};
+		Codec::dumps_t cbor_dumps = [py_dumps, extra_encode](py::object o) {
+			return py_dumps(o, py::arg("default")=extra_encode).cast<std::string>();
+		};
 		codecs.emplace(MIME_CBOR, Codec{cbor_loads, cbor_dumps});
 	} catch(std::exception const& e) {
 		if(verbose & Verbose::NOISY)

@@ -10,6 +10,8 @@ import types
 from typing import List, Dict, Tuple
 import warnings
 
+from .codecs import wrap_bytes_for_json, cbor_augment_encode, cbor_tag_decode
+
 
 async def resolve(objname: str, hostname: str, accept_types: List[str] | None = None):
     """Create a local reference to a networked resource.
@@ -77,7 +79,9 @@ AcceptTypes["application/json"] = decode_json
 try:
     import cbor2 as cbor
     def decode_cbor(response_data, encoding):
-        return cbor.loads(response_data, object_hook=lambda dec,data: TuberResult(data))
+        return cbor.loads(response_data,
+                          object_hook=lambda dec,data: TuberResult(data),
+                          tag_hook=cbor_tag_decode)
     AcceptTypes["application/cbor"] = decode_cbor
 except:
     pass
