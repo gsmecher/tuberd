@@ -33,15 +33,19 @@ Its main features and design principles are:
 
 - Pythonic call styles, including *args, **kwargs, and DocStrings.
 
+- JSON and CBOR support for efficient and friendly serialization of return
+  values.
+
 - "Less-is-more" approach to code. For example, Tuber uses pybind11_ and C++ as
   a shim between C and Python, because the combination gives us the shortest
   and most expressive way to produce the results we want. It pairs excellently
-  with orjson_ as a JSON interface, which efficiently serializes (for example)
-  NumPy_ arrays created in C++ across the network.
+  with orjson_ (as a JSON interface) or cbor2_ (as a CBOR interface), which
+  efficiently serialize (for example) NumPy_ arrays created in C++ across the
+  network.
 
-- Schema-less RPC using standard-ish protocols (HTTP 1.1, JSON, and something
-  like JSON-RPC_). Avoiding a schema allows server and client code to be
-  independently and seamlessly up- and downgraded, with differences between
+- Schema-less RPC using standard-ish protocols (HTTP 1.1, JSON, CBOR, and
+  something like JSON-RPC_). Avoiding a schema allows server and client code to
+  be independently and seamlessly up- and downgraded, with differences between
   exposed APIs only visible at the sites where RPC calls are made.
 
 - A mature, quick-ish, third-party, low-overhead, low-prerequisite embedded
@@ -110,6 +114,7 @@ licensing is a stumbling block for you, please contact me at
 .. _libhttpserver: https://github.com/etr/libhttpserver
 .. _NumPy: https://www.numpy.org
 .. _orjson: https://github.com/ijl/orjson
+.. _cbor2: https://github.com/agronholm/cbor2
 .. _libmicrohttpd: https://www.gnu.org/software/libmicrohttpd/
 .. _JSON-RPC: https://www.jsonrpc.org/
 .. _pybind11: https://pybind11.readthedocs.io/en/stable/index.html

@@ -5,7 +5,7 @@ from setuptools import setup
 
 setup(
     name='tuber',
-    version='1.0',
+    version='0.10',
     author='Graeme Smecher',
     author_email='gsmecher@threespeedlogic.com',
     description='Serve Python (or C++) objects across a LAN using something like JSON-RPC',

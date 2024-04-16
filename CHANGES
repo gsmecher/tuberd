@@ -1,3 +1,19 @@
+Version 0.10
+============
+
+- Adds support for CBOR as a transport mechanism.
+
+Version 0.9
+===========
+
+- Removes dependency on boost::program_options in favour of getoptA
+- Compatibility fixes for libfmt, libhttpserver, OS X, Clang
+
+Version 0.8
+===========
+
+- Compatibility fix for libfmt
+
 Version 0.7
 ===========
 
