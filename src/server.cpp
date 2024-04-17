@@ -36,15 +36,19 @@ struct fmt::formatter<T, std::enable_if_t<std::is_base_of<py::object, T>::value,
 	}
 };
 
-struct Codec{
+/* pybind11 assumes we're building a shared library (as would be normal for a
+ * module, rather than an embedded interpreter) and attempts to tweak
+ * shared-library symbol visibility as a result. Even though we don't care
+ * about symbol visibility here, we follow its lead to squash warnings. */
+#define DLL_LOCAL __attribute__((visibility("hidden")))
+
+struct DLL_LOCAL Codec {
 	using loads_t = std::function<py::object(std::string)>;
 	using dumps_t = std::function<std::string(py::object)>;
 
 	loads_t loads;
 	dumps_t dumps;
 };
-
-#define DLL_LOCAL __attribute__((visibility("hidden")))
 
 /* Verbosity is expressed as a bit mask:
  *     0: none (default)
