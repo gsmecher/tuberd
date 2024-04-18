@@ -309,7 +309,7 @@ class TuberObject:
     To use it, you should subclass this TuberObject.
     """
 
-    def __init__(self, objname: str, uri: str, accept_types: list[str] | None = None):
+    def __init__(self, objname: str | None, uri: str, accept_types: list[str] | None = None):
         self._tuber_objname = objname
         self._tuber_uri = uri
         self._accept_types = accept_types
@@ -327,6 +327,8 @@ class TuberObject:
         """Provide a list of what's here. (Used for tab-completion.)"""
 
         attrs = dir(super(TuberObject, self))
+        if hasattr(self._tuber_meta, "objects"):
+            return sorted(attrs + self._tuber_meta.objects)
         return sorted(attrs + self._tuber_meta.properties + self._tuber_meta.methods)
 
     async def tuber_resolve(self):
@@ -350,16 +352,19 @@ class TuberObject:
                 meta = await ctx()
                 meta = meta[0]
 
-                for p in meta.properties:
-                    ctx._add_call(object=self._tuber_objname, property=p)
-                prop_list = await ctx()
+                if self._tuber_objname is not None:
+                    for p in meta.properties:
+                        ctx._add_call(object=self._tuber_objname, property=p)
+                    prop_list = await ctx()
 
-                for m in meta.methods:
-                    ctx._add_call(object=self._tuber_objname, property=m)
-                meth_list = await ctx()
+                    for m in meta.methods:
+                        ctx._add_call(object=self._tuber_objname, property=m)
+                    meth_list = await ctx()
 
-                props = dict(zip(meta.properties, prop_list))
-                methods = dict(zip(meta.methods, meth_list))
+                    props = dict(zip(meta.properties, prop_list))
+                    methods = dict(zip(meta.methods, meth_list))
+                else:
+                    props = methods = None
 
             self._tuber_meta = meta
             self._tuber_meta_properties = props
@@ -388,6 +393,14 @@ class TuberObject:
                 e,
                 "No metadata! Did you forget to call tuber_resolve()?",
             )
+
+        # Top-level registry entries
+        if hasattr(meta, "objects"):
+            if name not in meta.objects:
+                raise AttributeError(f"'{name}' is not a valid attribute!")
+            obj = TuberObject(name, self._tuber_uri, self._accept_types)
+            setattr(self, name, obj)
+            return getattr(self, name)
 
         if name not in meta.methods and name not in meta.properties:
             raise AttributeError(f"'{name}' is not a valid method or property!")
