@@ -1,16 +1,16 @@
 import pytest
 
-pytest_plugins = ("pytest_asyncio", )
+pytest_plugins = ("pytest_asyncio",)
+
 
 # Allow test invocation to specify arguments to tuberd backend (this way, we
 # can re-use the same test machinery across different json libraries.)
 def pytest_addoption(parser):
-
     # Create a pass-through path for tuberd options (e.g. for verbosity)
     parser.addoption("--tuberd-option", action="append", default=[])
 
     # The "--orjson-with-numpy" option is handled as a special case because it
-    # changes test behaviour. 
+    # changes test behaviour.
     parser.addoption("--orjson-with-numpy", action="store_true", default=False)
 
 
