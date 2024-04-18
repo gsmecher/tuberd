@@ -2,18 +2,29 @@
 Tuber object interface
 """
 
+from __future__ import annotations
 import aiohttp
 import asyncio
 from collections.abc import Mapping
 import textwrap
 import types
-from typing import List, Dict, Tuple
 import warnings
 
 from .codecs import wrap_bytes_for_json, cbor_augment_encode, cbor_tag_decode
 
 
-async def resolve(objname: str, hostname: str, accept_types: List[str] | None = None):
+__all__ = [
+    "TuberError",
+    "TuberStateError",
+    "TuberRemoteError",
+    "TuberResult",
+    "TuberObject",
+    "resolve",
+    "resolve_all",
+]
+
+
+async def resolve(objname: str, hostname: str, accept_types: list[str] | None = None):
     """Create a local reference to a networked resource.
 
     This is the recommended way to connect to remote tuberd instances.
@@ -22,6 +33,38 @@ async def resolve(objname: str, hostname: str, accept_types: List[str] | None = 
     instance = TuberObject(objname, f"http://{hostname}/tuber", accept_types=accept_types)
     await instance.tuber_resolve()
     return instance
+
+
+async def resolve_all(hostname: str, accept_types: list[str] | None = None, create=True):
+    """Discover all objects on a networked resource.
+
+    This is the recommended way to connect to remote tuberd instances.
+
+    Arguments
+    ---------
+    hostname : str
+        Hostname on which the tuberd instance is running.
+    accept_types: list of str
+        List of response data types accepted by the client.
+    create : bool
+        If True, return a dictionary of resolved TuberObjects keyed by object name.
+        Otherwise, return a list of object names.
+
+    Returns
+    -------
+    objs : list of str or dict of TuberObjects
+        List of object names, or dict of TuberObjects, depending on the value of
+        the ``create`` option.
+    """
+    async with Context(uri=f"http://{hostname}/tuber", accept_types=accept_types) as ctx:
+        ctx._add_call()
+        meta = await ctx()
+        objnames = meta[0].objects
+
+    if not create:
+        return objnames
+
+    return {obj: await resolve(obj, hostname, accept_types) for obj in objnames}
 
 
 class TuberError(Exception):
@@ -112,9 +155,21 @@ class Context(object):
     up to reduce roundtrips.
     """
 
-    def __init__(self, obj: "TuberObject", accept_types: List[str] | None = None, **ctx_kwargs):
-        self.calls: List[Tuple[Dict,asyncio.Future]] = []
+    def __init__(
+        self,
+        obj: "TuberObject" | None = None,
+        uri: str | None = None,
+        accept_types: list[str] | None = None,
+        **ctx_kwargs
+    ):
+        self.calls: list[tuple[dict, asyncio.Future]] = []
         self.obj = obj
+        if obj is None:
+            if uri is None:
+                raise ValueError("Argument 'uri' required if 'obj' not provided")
+            self.uri = uri
+        else:
+            self.uri = self.obj._tuber_uri
         if accept_types is None:
             self.accept_types = list(AcceptTypes.keys())
         else:
@@ -177,7 +232,7 @@ class Context(object):
         # Create a HTTP request to complete the call. This is a coroutine,
         # so we queue the call and then suspend execution (via 'yield')
         # until it's complete.
-        async with cs.post(self.obj._tuber_uri, json=calls, headers=headers) as resp:
+        async with cs.post(self.uri, json=calls, headers=headers) as resp:
             raw_out = await resp.read()
             if not resp.ok:
                 try:
@@ -225,7 +280,7 @@ class Context(object):
         return [ await f for f in futures ]
 
     def __getattr__(self, name):
-        if attribute_blacklisted(name):
+        if attribute_blacklisted(name) or self.obj is None:
             raise AttributeError(f"{name} is not a valid method or property!")
 
         # Queue methods calls.
@@ -254,7 +309,7 @@ class TuberObject:
     To use it, you should subclass this TuberObject.
     """
 
-    def __init__(self, objname: str | None, uri: str, accept_types: List[str] | None = None):
+    def __init__(self, objname: str, uri: str, accept_types: list[str] | None = None):
         self._tuber_objname = objname
         self._tuber_uri = uri
         self._accept_types = accept_types
