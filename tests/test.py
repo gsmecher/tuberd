@@ -538,3 +538,12 @@ async def test_tuberpy_warnings(tuber_call, accept_types):
     with pytest.raises(tuber.TuberRemoteError), \
             pytest.warns(match="This is a warning"):
         await s.single_warning("This is a warning", error=True)
+
+
+@pytest.mark.parametrize("accept_types", ACCEPT_TYPES)
+@pytest.mark.asyncio
+async def test_tuberpy_resolve_all(tuber_call, accept_types):
+    """Ensure resolve_all finds all registry entries"""
+    s = await tuber.resolve_all(TUBERD_HOSTNAME, accept_types)
+
+    assert list(s) == list(registry)
