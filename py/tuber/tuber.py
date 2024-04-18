@@ -61,27 +61,32 @@ try:
     import simplejson as json
 except ModuleNotFoundError:
     import json  # type: ignore[no-redef]
+
+
 def decode_json(response_data, encoding):
     if encoding is None:  # guess the typical default if unspecified
         encoding = "utf-8"
+
     def ohook(obj):
-        if isinstance(obj, Mapping) and "bytes" in obj \
-          and (len(obj) == 1 or (len(obj) == 2 and "subtype" in obj)):
+        if isinstance(obj, Mapping) and "bytes" in obj and (len(obj) == 1 or (len(obj) == 2 and "subtype" in obj)):
             try:
                 return bytes(obj["bytes"])
             except e as ValueError:
                 pass
         return TuberResult(obj)
+
     return json.JSONDecoder(object_hook=ohook).decode(response_data.decode(encoding))
+
+
 AcceptTypes["application/json"] = decode_json
 
 # Use cbor2 to handle CBOR, if available
 try:
     import cbor2 as cbor
+
     def decode_cbor(response_data, encoding):
-        return cbor.loads(response_data,
-                          object_hook=lambda dec,data: TuberResult(data),
-                          tag_hook=cbor_tag_decode)
+        return cbor.loads(response_data, object_hook=lambda dec, data: TuberResult(data), tag_hook=cbor_tag_decode)
+
     AcceptTypes["application/cbor"] = decode_cbor
 except:
     pass
@@ -113,7 +118,7 @@ class Context(object):
     """
 
     def __init__(self, obj: "TuberObject", accept_types: List[str] | None = None, **ctx_kwargs):
-        self.calls: List[Tuple[Dict,asyncio.Future]] = []
+        self.calls: List[Tuple[Dict, asyncio.Future]] = []
         self.obj = obj
         if accept_types is None:
             self.accept_types = list(AcceptTypes.keys())
@@ -162,18 +167,20 @@ class Context(object):
             # is not sufficient to simply attach the session to the loop to
             # ensure garbage collection.
             loop_close = loop.close
+
             def close(self):
                 if hasattr(self, "_tuber_session"):
                     if not self.is_closed():
                         self.run_until_complete(self._tuber_session.close())
                     del self._tuber_session
                 loop_close()
+
             loop.close = types.MethodType(close, loop)
 
         cs = loop._tuber_session
 
         # Declare the media types we want to allow getting back
-        headers={"Accept":", ".join(self.accept_types)}
+        headers = {"Accept": ", ".join(self.accept_types)}
         # Create a HTTP request to complete the call. This is a coroutine,
         # so we queue the call and then suspend execution (via 'yield')
         # until it's complete.
@@ -189,7 +196,7 @@ class Context(object):
             # Check that the resulting media type is one which can actually be handled;
             # this is slightly more liberal than checking that it is really among those we declared
             if content_type not in AcceptTypes:
-                raise TuberError("Unexpected response content type: "+content_type)
+                raise TuberError("Unexpected response content type: " + content_type)
             json_out = AcceptTypes[content_type](raw_out, resp.charset)
 
         if hasattr(json_out, "error"):
@@ -222,7 +229,7 @@ class Context(object):
                     f.set_exception(TuberError("Result has no 'result' attribute"))
 
         # Return a list of results
-        return [ await f for f in futures ]
+        return [await f for f in futures]
 
     def __getattr__(self, name):
         if attribute_blacklisted(name):

@@ -82,9 +82,10 @@ class NumPy:
     def returns_numpy_array(self):
         return np.array([0, 1, 2, 3])
 
+
 class WarningsClass:
     def single_warning(self, warning_text, error=False):
-        warnings.resetwarnings() # ensure no filters
+        warnings.resetwarnings()  # ensure no filters
         warnings.warn(warning_text)
 
         if error:
@@ -93,7 +94,7 @@ class WarningsClass:
         return True
 
     def multiple_warnings(self, warning_count=1, error=False):
-        warnings.resetwarnings() # ensure no filters
+        warnings.resetwarnings()  # ensure no filters
         for n in range(warning_count):
             warnings.warn(f"Warning {n+1}")
 
@@ -101,6 +102,7 @@ class WarningsClass:
             raise RuntimeError("Oops!")
 
         return True
+
 
 registry = {
     "NullObject": NullObject(),
@@ -178,11 +180,13 @@ def tuber_call(request, tuberd):
         # "json" parameter.  However, for convenience's sake, we also allow
         # kwargs to supply a dict parameter since we often call with dicts and
         # this results in a more readable code style.
-        return loads(session.post(
-            TUBERD_URI,
-            json=kwargs if json is None else json,
-            headers={"Accept": accept},
-        ).content)
+        return loads(
+            session.post(
+                TUBERD_URI,
+                json=kwargs if json is None else json,
+                headers={"Accept": accept},
+            ).content
+        )
 
     yield tuber_call
 
@@ -209,9 +213,7 @@ def test_empty_request_array(tuber_call):
 
 def test_describe(tuber_call):
     assert tuber_call(json={}) == Succeeded(objects=list(registry))
-    assert tuber_call(object="ObjectWithPrivateMethod") == Succeeded(
-        __doc__=None, methods=[], properties=[]
-    )
+    assert tuber_call(object="ObjectWithPrivateMethod") == Succeeded(__doc__=None, methods=[], properties=[])
 
 
 def test_fetch_null_metadata(tuber_call):
@@ -276,13 +278,14 @@ def test_numpy_types(tuber_call):
     assert "result" in result
     assert (np.array([0, 1, 2, 3]) == result["result"]).all()
 
-#
-# pybind11 wrappers
-#
+    #
+    # pybind11 wrappers
+    #
 
     assert tuber_call(object="Types", method="string_function", args=["this is a string"]) == Succeeded(
         "this is a string"
     )
+
 
 @pytest.mark.orjson
 def test_double_vector(tuber_call):
@@ -292,10 +295,12 @@ def test_double_vector(tuber_call):
 def test_unserializable(tuber_call):
     # Errors differ between orjson, standard json, and CBOR
     message = tuber_call(object="Wrapper", method="unserializable")["error"]["message"]
-    assert message.startswith("ValueError:") or \
-            message.startswith("CBOREncodeTypeError:") or \
-            message.startswith("TypeError: default serializer") or \
-            message.startswith("CBOREncodeTypeError: cannot serialize")
+    assert (
+        message.startswith("ValueError:")
+        or message.startswith("CBOREncodeTypeError:")
+        or message.startswith("TypeError: default serializer")
+        or message.startswith("CBOREncodeTypeError: cannot serialize")
+    )
 
 
 #
@@ -367,11 +372,19 @@ def test_cpp_enum_orjson_serialize():
 # tuber.py tests
 #
 
-ACCEPT_TYPES=[
-    ["application/json",],
-    ["application/cbor",],
-    ["application/json", "application/cbor",],
+ACCEPT_TYPES = [
+    [
+        "application/json",
+    ],
+    [
+        "application/cbor",
+    ],
+    [
+        "application/json",
+        "application/cbor",
+    ],
 ]
+
 
 @pytest.mark.parametrize("accept_types", ACCEPT_TYPES)
 @pytest.mark.asyncio
@@ -519,6 +532,7 @@ async def test_tuberpy_async_context_with_unserializable(tuber_call, accept_type
     with pytest.raises(tuber.TuberRemoteError):
         await r3
 
+
 @pytest.mark.parametrize("accept_types", ACCEPT_TYPES)
 @pytest.mark.asyncio
 async def test_tuberpy_warnings(tuber_call, accept_types):
@@ -535,6 +549,5 @@ async def test_tuberpy_warnings(tuber_call, accept_types):
         assert len(ws) == 5
 
     # Check with exceptions
-    with pytest.raises(tuber.TuberRemoteError), \
-            pytest.warns(match="This is a warning"):
+    with pytest.raises(tuber.TuberRemoteError), pytest.warns(match="This is a warning"):
         await s.single_warning("This is a warning", error=True)
