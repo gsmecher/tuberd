@@ -254,7 +254,7 @@ class TuberObject:
     To use it, you should subclass this TuberObject.
     """
 
-    def __init__(self, objname: str | None = None, uri: str, accept_types: List[str] | None = None):
+    def __init__(self, objname: str | None, uri: str, accept_types: List[str] | None = None):
         self._tuber_objname = objname
         self._tuber_uri = uri
         self._accept_types = accept_types
