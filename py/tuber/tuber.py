@@ -112,7 +112,7 @@ class Context(object):
     up to reduce roundtrips.
     """
 
-    def __init__(self, obj: str, accept_types: List[str] | None = None, **ctx_kwargs):
+    def __init__(self, obj: "TuberObject", accept_types: List[str] | None = None, **ctx_kwargs):
         self.calls: List[Tuple[Dict,asyncio.Future]] = []
         self.obj = obj
         if accept_types is None:
@@ -254,7 +254,7 @@ class TuberObject:
     To use it, you should subclass this TuberObject.
     """
 
-    def __init__(self, objname: str, uri: str, accept_types: List[str] | None = None):
+    def __init__(self, objname: str | None, uri: str, accept_types: List[str] | None = None):
         self._tuber_objname = objname
         self._tuber_uri = uri
         self._accept_types = accept_types
