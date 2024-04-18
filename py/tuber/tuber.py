@@ -112,7 +112,7 @@ class Context(object):
     up to reduce roundtrips.
     """
 
-    def __init__(self, obj: TuberObject, accept_types: List[str] | None = None, **ctx_kwargs):
+    def __init__(self, obj: "TuberObject", accept_types: List[str] | None = None, **ctx_kwargs):
         self.calls: List[Tuple[Dict,asyncio.Future]] = []
         self.obj = obj
         if accept_types is None:
