@@ -23,9 +23,10 @@ try:
     from .client import (
         TuberObject,
         resolve,
+        resolve_all,
     )
 
-    __all__ += ["TuberObject", "resolve"]
+    __all__ += ["TuberObject", "resolve", "resolve_all"]
 except ImportError as ie:
     import os
 
