@@ -28,9 +28,6 @@ async def resolve(hostname: str, objname: str | None = None, accept_types: list[
 
     instance = TuberObject(objname, uri=f"http://{hostname}/tuber", accept_types=accept_types)
     await instance.tuber_resolve()
-    if objname is None:
-        for obj in instance._tuber_meta.objects:
-            await getattr(instance, obj).tuber_resolve()
     return instance
 
 
@@ -275,9 +272,18 @@ class TuberObject:
         self._tuber_objname = objname
         self._tuber_uri = uri
         self._accept_types = accept_types
+        self._tuber_meta = None
 
     def tuber_context(self, **kwargs):
         return Context(self, accept_types=self._accept_types, **kwargs)
+
+    def object_factory(self, objname):
+        """Construct a child TuberObject for the given resource name.
+
+        Overload this method to create child objects using different subclasses.
+        """
+
+        return TuberObject(objname, uri=self._tuber_uri, accept_types=self._accept_types)
 
     @property
     def __doc__(self):
@@ -285,109 +291,71 @@ class TuberObject:
 
         return self._tuber_meta.__doc__
 
-    def __dir__(self):
-        """Provide a list of what's here. (Used for tab-completion.)"""
-
-        attrs = dir(super(TuberObject, self))
-        if hasattr(self._tuber_meta, "objects"):
-            return sorted(attrs + self._tuber_meta.objects)
-        return sorted(attrs + self._tuber_meta.properties + self._tuber_meta.methods)
-
-    async def tuber_resolve(self):
+    async def tuber_resolve(self, force=False):
         """Retrieve metadata associated with the remote network resource.
 
-        This data isn't strictly needed to construct "blind" JSON-RPC calls,
-        except for user-friendliness:
-
-           * tab-completion requires knowledge of what the board does, and
-           * docstrings are useful, but must be retrieved and attached.
-
-        This class retrieves object-wide metadata, which can be used to build
-        up properties and values (with tab-completion and docstrings)
-        on-the-fly as they're needed.
+        This class retrieves object-wide metadata, which is used to build
+        up properties and methods with tab-completion and docstrings.
         """
-        try:
-            return (self._tuber_meta, self._tuber_meta_properties, self._tuber_meta_methods)
-        except AttributeError:
-            async with self.tuber_context() as ctx:
-                ctx._add_call(object=self._tuber_objname)
-                meta = await ctx()
-                meta = meta[0]
+        if not force:
+            try:
+                return (self._tuber_meta, self._tuber_meta_properties, self._tuber_meta_methods)
+            except AttributeError:
+                pass
 
-                if self._tuber_objname is not None:
-                    for p in meta.properties:
-                        ctx._add_call(object=self._tuber_objname, property=p)
-                    prop_list = await ctx()
+        async with self.tuber_context() as ctx:
+            ctx._add_call(object=self._tuber_objname)
+            meta = await ctx()
+            meta = meta[0]
 
-                    for m in meta.methods:
-                        ctx._add_call(object=self._tuber_objname, property=m)
-                    meth_list = await ctx()
+            if self._tuber_objname is not None:
+                for p in meta.properties:
+                    ctx._add_call(object=self._tuber_objname, property=p)
+                prop_list = await ctx()
 
-                    props = dict(zip(meta.properties, prop_list))
-                    methods = dict(zip(meta.methods, meth_list))
-                else:
-                    props = methods = None
+                for m in meta.methods:
+                    ctx._add_call(object=self._tuber_objname, property=m)
+                meth_list = await ctx()
 
-            self._tuber_meta = meta
-            self._tuber_meta_properties = props
-            self._tuber_meta_methods = methods
-            return (meta, props, methods)
-
-    def __getattr__(self, name):
-        """Remote function call magic.
-
-        This function is called to get attributes (e.g. class variables and
-        functions) that don't exist on "self". Since we build up a cache of
-        descriptors for things we've seen before, we don't need to avoid
-        round-trips to the board for metadata in the following code.
-        """
-
-        # Refuse to __getattr__ a couple of special names used elsewhere.
-        if attribute_blacklisted(name):
-            raise AttributeError(f"'{name}' is not a valid method or property!")
-
-        # Make sure this request corresponds to something in the underlying
-        # TuberObject.
-        try:
-            meta, metap, metam = (self._tuber_meta, self._tuber_meta_properties, self._tuber_meta_methods)
-        except KeyError as e:
-            raise TuberStateError(
-                e,
-                "No metadata! Did you forget to call tuber_resolve()?",
-            )
+                props = dict(zip(meta.properties, prop_list))
+                methods = dict(zip(meta.methods, meth_list))
+            else:
+                props = methods = None
 
         # Top-level registry entries
-        if hasattr(meta, "objects"):
-            if name not in meta.objects:
-                raise AttributeError(f"'{name}' is not a valid attribute!")
-            obj = TuberObject(name, uri=self._tuber_uri, accept_types=self._accept_types)
-            setattr(self, name, obj)
-            return getattr(self, name)
+        for objname in getattr(meta, "objects", []):
+            obj = self.object_factory(objname)
+            await obj.tuber_resolve()
+            setattr(self, objname, obj)
 
-        if name not in meta.methods and name not in meta.properties:
-            raise AttributeError(f"'{name}' is not a valid method or property!")
+        for propname in getattr(meta, "properties", []):
+            setattr(self, propname, props[propname])
 
-        if name in meta.properties:
-            # Fall back on properties.
-            setattr(self, name, metap[name])
-            return getattr(self, name)
-
-        if name in meta.methods:
+        for methname in getattr(meta, "methods", []):
             # Generate a callable prototype
-            async def invoke(self, *args, **kwargs):
-                async with self.tuber_context() as ctx:
-                    result = getattr(ctx, name)(*args, **kwargs)
-                return await result
+            def invoke_wrapper(name):
+                async def invoke(self, *args, **kwargs):
+                    async with self.tuber_context() as ctx:
+                        result = getattr(ctx, name)(*args, **kwargs)
+                    return await result
+
+                return invoke
+
+            invoke = invoke_wrapper(methname)
 
             # Attach DocStrings, if provided and valid
             try:
-                invoke.__doc__ = textwrap.dedent(metam[name].__doc__)
+                invoke.__doc__ = textwrap.dedent(methods[methname].__doc__)
             except:
                 pass
 
             # Associate as a class method.
-            setattr(self, name, types.MethodType(invoke, self))
-            return getattr(self, name)
+            setattr(self, methname, types.MethodType(invoke, self))
+
+        self._tuber_meta = meta
+        self._tuber_meta_properties = props
+        self._tuber_meta_methods = methods
+        return (meta, props, methods)
 
 
 # vim: sts=4 ts=4 sw=4 tw=78 smarttab expandtab

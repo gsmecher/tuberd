@@ -556,7 +556,8 @@ async def test_tuberpy_warnings(tuber_call, accept_types):
 @pytest.mark.parametrize("accept_types", ACCEPT_TYPES)
 @pytest.mark.asyncio
 async def test_tuberpy_resolve_all(tuber_call, accept_types):
-    """Ensure resolve_all finds all registry entries"""
+    """Ensure resolve finds all registry entries"""
     s = await tuber.resolve(TUBERD_HOSTNAME, accept_types=accept_types)
 
     assert set(dir(s)) >= set(registry)
+    assert set(dir(s.Types)) >= set(dir(registry["Types"]))
