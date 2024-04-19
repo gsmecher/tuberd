@@ -389,7 +389,7 @@ ACCEPT_TYPES = [
 @pytest.mark.parametrize("accept_types", ACCEPT_TYPES)
 @pytest.mark.asyncio
 async def test_tuberpy_hello(tuber_call, accept_types):
-    s = await tuber.resolve("Wrapper", TUBERD_HOSTNAME, accept_types)
+    s = await tuber.resolve(TUBERD_HOSTNAME, "Wrapper", accept_types)
     x = await s.increment([1, 2, 3, 4, 5])
     assert x == [2, 3, 4, 5, 6]
 
@@ -400,7 +400,7 @@ async def test_tuberpy_dir(tuber_call, accept_types):
     """Ensure embedded methods end up in dir() of objects.
 
     This is a crude proxy for the ability to tab-complete."""
-    s = await tuber.resolve("Wrapper", TUBERD_HOSTNAME, accept_types)
+    s = await tuber.resolve(TUBERD_HOSTNAME, "Wrapper", accept_types)
     assert "increment" in dir(s)
 
 
@@ -409,7 +409,7 @@ async def test_tuberpy_dir(tuber_call, accept_types):
 async def test_tuberpy_module_docstrings(tuber_call, accept_types):
     """Ensure docstrings in C++ methods end up in the TuberObject's __doc__ dunder."""
 
-    s = await tuber.resolve("Wrapper", TUBERD_HOSTNAME, accept_types)
+    s = await tuber.resolve(TUBERD_HOSTNAME, "Wrapper", accept_types)
     assert (
         s.__doc__
         == textwrap.dedent(
@@ -424,7 +424,7 @@ async def test_tuberpy_module_docstrings(tuber_call, accept_types):
 async def test_tuberpy_method_docstrings(tuber_call, accept_types):
     """Ensure docstrings in C++ methods end up in the TuberObject's __doc__ dunder."""
 
-    s = await tuber.resolve("Wrapper", TUBERD_HOSTNAME, accept_types)
+    s = await tuber.resolve(TUBERD_HOSTNAME, "Wrapper", accept_types)
     assert (
         s.increment.__doc__
         == textwrap.dedent(
@@ -440,7 +440,7 @@ async def test_tuberpy_method_docstrings(tuber_call, accept_types):
 @pytest.mark.asyncio
 async def test_tuberpy_session_cache(tuber_call, accept_types):
     """Ensure we don't create a new ClientSession with every call."""
-    s = await tuber.resolve("Wrapper", TUBERD_HOSTNAME, accept_types)
+    s = await tuber.resolve(TUBERD_HOSTNAME, "Wrapper", accept_types)
     await s.increment([1, 2, 3])
     aiohttp.ClientSession = None  # break ClientSession instantiation
     await s.increment([4, 5, 6])
@@ -453,7 +453,7 @@ async def test_tuberpy_session_cache(tuber_call, accept_types):
 @pytest.mark.asyncio
 async def test_tuberpy_async_context(tuber_call, accept_types):
     """Ensure we can use tuber_contexts to batch calls."""
-    s = await tuber.resolve("Wrapper", TUBERD_HOSTNAME, accept_types)
+    s = await tuber.resolve(TUBERD_HOSTNAME, "Wrapper", accept_types)
     async with s.tuber_context() as ctx:
         r1 = ctx.increment([1, 2, 3])
         r2 = ctx.increment([2, 3, 4])
@@ -467,7 +467,7 @@ async def test_tuberpy_async_context(tuber_call, accept_types):
 @pytest.mark.asyncio
 async def test_tuberpy_async_context_with_kwargs(tuber_call, accept_types):
     """Ensure we can use tuber_contexts to batch calls."""
-    s = await tuber.resolve("Wrapper", TUBERD_HOSTNAME, accept_types)
+    s = await tuber.resolve(TUBERD_HOSTNAME, "Wrapper", accept_types)
     async with s.tuber_context(x=[1, 2, 3]) as ctx:
         r1 = ctx.increment()
         r2 = ctx.increment()
@@ -481,7 +481,7 @@ async def test_tuberpy_async_context_with_kwargs(tuber_call, accept_types):
 @pytest.mark.asyncio
 async def test_tuberpy_async_context_with_exception(tuber_call, accept_types):
     """Ensure exceptions in a sequence of calls show up as expected."""
-    s = await tuber.resolve("Wrapper", TUBERD_HOSTNAME, accept_types)
+    s = await tuber.resolve(TUBERD_HOSTNAME, "Wrapper", accept_types)
 
     with pytest.raises(tuber.TuberRemoteError):
         async with s.tuber_context() as ctx:
@@ -508,7 +508,7 @@ async def test_tuberpy_async_context_with_exception(tuber_call, accept_types):
 @pytest.mark.asyncio
 async def test_tuberpy_unserializable(tuber_call, accept_types):
     """Ensure unserializable objects return an error."""
-    s = await tuber.resolve("Wrapper", TUBERD_HOSTNAME, accept_types)
+    s = await tuber.resolve(TUBERD_HOSTNAME, "Wrapper", accept_types)
     with pytest.raises(tuber.TuberRemoteError):
         await s.unserializable()
 
@@ -518,7 +518,7 @@ async def test_tuberpy_unserializable(tuber_call, accept_types):
 @pytest.mark.asyncio
 async def test_tuberpy_async_context_with_unserializable(tuber_call, accept_types):
     """Ensure exceptions in a sequence of calls show up as expected."""
-    s = await tuber.resolve("Wrapper", TUBERD_HOSTNAME, accept_types)
+    s = await tuber.resolve(TUBERD_HOSTNAME, "Wrapper", accept_types)
     async with s.tuber_context() as ctx:
         r1 = ctx.increment([1, 2, 3])  # fine
         r2 = ctx.unserializable()
@@ -537,7 +537,7 @@ async def test_tuberpy_async_context_with_unserializable(tuber_call, accept_type
 @pytest.mark.asyncio
 async def test_tuberpy_warnings(tuber_call, accept_types):
     """Ensure warnings are captured"""
-    s = await tuber.resolve("Warnings", TUBERD_HOSTNAME, accept_types)
+    s = await tuber.resolve(TUBERD_HOSTNAME, "Warnings", accept_types)
 
     # Single, simple warning
     with pytest.warns(match="This is a warning"):
@@ -557,6 +557,6 @@ async def test_tuberpy_warnings(tuber_call, accept_types):
 @pytest.mark.asyncio
 async def test_tuberpy_resolve_all(tuber_call, accept_types):
     """Ensure resolve_all finds all registry entries"""
-    s = await tuber.resolve_all(TUBERD_HOSTNAME, accept_types)
+    s = await tuber.resolve(TUBERD_HOSTNAME, accept_types=accept_types)
 
     assert set(dir(s)) >= set(registry)

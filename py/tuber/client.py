@@ -15,45 +15,22 @@ from .codecs import wrap_bytes_for_json, cbor_augment_encode, cbor_tag_decode
 
 
 __all__ = [
-    "TuberResult",
     "TuberObject",
     "resolve",
-    "resolve_all",
 ]
 
 
-async def resolve(objname: str, hostname: str, accept_types: list[str] | None = None):
+async def resolve(hostname: str, objname: str | None = None, accept_types: list[str] | None = None):
     """Create a local reference to a networked resource.
 
     This is the recommended way to connect to remote tuberd instances.
     """
 
-    instance = TuberObject(objname, f"http://{hostname}/tuber", accept_types=accept_types)
+    instance = TuberObject(objname, uri=f"http://{hostname}/tuber", accept_types=accept_types)
     await instance.tuber_resolve()
-    return instance
-
-
-async def resolve_all(hostname: str, accept_types: list[str] | None = None):
-    """Discover all objects on a networked resource.
-
-    This is the recommended way to connect to remote tuberd instances.
-
-    Arguments
-    ---------
-    hostname : str
-        Hostname on which the tuberd instance is running.
-    accept_types: list of str
-        List of response data types accepted by the client.
-
-    Returns
-    -------
-    obj : TuberObject instance
-        Attributes of this object are entries in the remote tuberd registry.
-    """
-    instance = TuberObject(None, f"http://{hostname}/tuber", accept_types=accept_types)
-    await instance.tuber_resolve()
-    for objname in instance._tuber_meta.objects:
-        await getattr(instance, objname).tuber_resolve()
+    if objname is None:
+        for obj in instance._tuber_meta.objects:
+            await getattr(instance, obj).tuber_resolve()
     return instance
 
 
@@ -294,7 +271,7 @@ class TuberObject:
     To use it, you should subclass this TuberObject.
     """
 
-    def __init__(self, objname: str | None, uri: str, accept_types: list[str] | None = None):
+    def __init__(self, objname: str | None, *, uri: str, accept_types: list[str] | None = None):
         self._tuber_objname = objname
         self._tuber_uri = uri
         self._accept_types = accept_types
@@ -383,7 +360,7 @@ class TuberObject:
         if hasattr(meta, "objects"):
             if name not in meta.objects:
                 raise AttributeError(f"'{name}' is not a valid attribute!")
-            obj = TuberObject(name, self._tuber_uri, self._accept_types)
+            obj = TuberObject(name, uri=self._tuber_uri, accept_types=self._accept_types)
             setattr(self, name, obj)
             return getattr(self, name)
 
