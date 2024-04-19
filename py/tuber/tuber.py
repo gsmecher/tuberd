@@ -35,7 +35,7 @@ async def resolve(objname: str, hostname: str, accept_types: list[str] | None = 
     return instance
 
 
-async def resolve_all(hostname: str, accept_types: list[str] | None = None, create=True):
+async def resolve_all(hostname: str, accept_types: list[str] | None = None):
     """Discover all objects on a networked resource.
 
     This is the recommended way to connect to remote tuberd instances.
@@ -46,25 +46,17 @@ async def resolve_all(hostname: str, accept_types: list[str] | None = None, crea
         Hostname on which the tuberd instance is running.
     accept_types: list of str
         List of response data types accepted by the client.
-    create : bool
-        If True, return a dictionary of resolved TuberObjects keyed by object name.
-        Otherwise, return a list of object names.
 
     Returns
     -------
-    objs : list of str or dict of TuberObjects
-        List of object names, or dict of TuberObjects, depending on the value of
-        the ``create`` option.
+    obj : TuberObject instance
+        Attributes of this object are entries in the remote tuberd registry.
     """
-    async with Context(uri=f"http://{hostname}/tuber", accept_types=accept_types) as ctx:
-        ctx._add_call()
-        meta = await ctx()
-        objnames = meta[0].objects
-
-    if not create:
-        return objnames
-
-    return {obj: await resolve(obj, hostname, accept_types) for obj in objnames}
+    instance = TuberObject(None, f"http://{hostname}/tuber", accept_types=accept_types)
+    await instance.tuber_resolve()
+    for objname in instance._tuber_meta.objects:
+        await getattr(instance, objname).tuber_resolve()
+    return instance
 
 
 class TuberError(Exception):
