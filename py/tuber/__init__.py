@@ -1,11 +1,36 @@
-from .tuber import (
-    TuberError,
-    TuberStateError,
-    TuberRemoteError,
-    TuberObject,
-    resolve,
-)
+class TuberError(Exception):
+    pass
 
-__all__ = ["TuberError", "TuberRemoteError", "TuberObject", "resolve"]
+
+class TuberStateError(TuberError):
+    pass
+
+
+class TuberRemoteError(TuberError):
+    pass
+
+
+__all__ = [
+    "TuberError",
+    "TuberRemoteError",
+    "TuberStateError",
+]
+
+# The tuber module is imported in both server and client environments. Because
+# the server execution environment may be minimal, we may bump into
+# ModuleNotFoundErrors in client code - which we may want to ignore.
+try:
+    from .client import (
+        TuberObject,
+        resolve,
+    )
+
+    __all__ += ["TuberObject", "resolve"]
+except ImportError as ie:
+    import os
+
+    if "TUBER_SERVER" not in os.environ:
+        raise ie
+
 
 # vim: sts=4 ts=4 sw=4 tw=78 smarttab expandtab
