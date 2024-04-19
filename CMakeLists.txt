@@ -35,9 +35,5 @@ add_test(NAME test-orjson-fastpath
 set_tests_properties(test-native-json test-orjson-fastpath
 	PROPERTIES ENVIRONMENT "CMAKE_BINARY_DIR=${CMAKE_BINARY_DIR};CMAKE_SOURCE_DIR=${CMAKE_SOURCE_DIR};PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}/py")
 
-# The server only requires the preamble be installed - and outside of
-# PYTHONPATH is fine.
 set_target_properties(tuberd PROPERTIES PUBLIC_HEADER "include/tuber_support.hpp")
-
-install(FILES py/preamble.py DESTINATION share/tuberd)
 install(TARGETS tuberd PUBLIC_HEADER DESTINATION include)
