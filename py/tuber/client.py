@@ -10,6 +10,7 @@ import types
 from typing import List, Dict, Tuple
 import warnings
 
+from . import TuberError, TuberStateError, TuberRemoteError
 from .codecs import wrap_bytes_for_json, cbor_augment_encode, cbor_tag_decode
 
 
@@ -22,18 +23,6 @@ async def resolve(objname: str, hostname: str, accept_types: List[str] | None = 
     instance = TuberObject(objname, f"http://{hostname}/tuber", accept_types=accept_types)
     await instance.tuber_resolve()
     return instance
-
-
-class TuberError(Exception):
-    pass
-
-
-class TuberStateError(TuberError):
-    pass
-
-
-class TuberRemoteError(TuberError):
-    pass
 
 
 class TuberResult:
