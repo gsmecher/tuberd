@@ -16,6 +16,7 @@ sys.path.append(os.path.expanduser(f"~/.local/lib/python{ver}/site-packages"))
 # versions of pybind11.
 sys.path.append(".")
 
+
 def result_response(arg=None, **kwargs):
     """
     Return a valid result response to the server to be parsed by the client.
@@ -33,9 +34,9 @@ def error_response(message):
 
 
 def describe(registry, request):
-    '''
+    """
     Tuber slow path
-    
+
     This is invoked with a "request" object that does _not_ contain "object"
     and "method" keys, which would indicate a RPC operation.
 
@@ -48,22 +49,20 @@ def describe(registry, request):
 
     Since these are all cached on the client side, we are more concerned about
     correctness and robustness than performance here.
-    '''
+    """
 
-    objname = request['object'] if 'object' in request else None
-    methodname = request['method'] if 'method' in request else None
-    propertyname = request['property'] if 'property' in request else None
+    objname = request["object"] if "object" in request else None
+    methodname = request["method"] if "method" in request else None
+    propertyname = request["property"] if "property" in request else None
 
     if not objname and not methodname and not propertyname:
         # registry metadata
         return result_response(objects=list(registry))
 
     try:
-       obj = registry[objname]
+        obj = registry[objname]
     except KeyError:
-        return error_response(
-            f"Request for an object ({objname}) that wasn't in the registry!"
-        )
+        return error_response(f"Request for an object ({objname}) that wasn't in the registry!")
 
     if not methodname and not propertyname:
         # Object metadata.
@@ -74,7 +73,7 @@ def describe(registry, request):
         for c in dir(obj):
             # Don't export dunder methods or attributes - this avoids exporting
             # Python internals on the server side to any client.
-            if c.startswith('__') or c.startswith(f"_{clsname}__"):
+            if c.startswith("__") or c.startswith(f"_{clsname}__"):
                 continue
 
             if callable(getattr(obj, c)):
@@ -82,16 +81,12 @@ def describe(registry, request):
             else:
                 properties.append(c)
 
-        return result_response(
-            __doc__=inspect.getdoc(obj), methods=methods, properties=properties
-        )
+        return result_response(__doc__=inspect.getdoc(obj), methods=methods, properties=properties)
 
     if propertyname:
         # Sanity check
         if not hasattr(obj, propertyname):
-            return error_response(
-                f"{propertyname} is not a method or property of object {objname}"
-            )
+            return error_response(f"{propertyname} is not a method or property of object {objname}")
 
         # Returning a method description or property evaluation
         attr = getattr(obj, propertyname)
@@ -103,6 +98,4 @@ def describe(registry, request):
         # Complex case: return a description of a method
         return result_response(__doc__=inspect.getdoc(attr))
 
-    return error_response(
-        f"Invalid request (object={objname}, method={methodname}, property={propertyname})"
-    )
+    return error_response(f"Invalid request (object={objname}, method={methodname}, property={propertyname})")
