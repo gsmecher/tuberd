@@ -1,3 +1,12 @@
+Version 0.11
+============
+
+- resolve now required (20)
+- tuber package rearranged to tuber.server / tuber.client; registry moved to server (#19)
+- linter (black) added to CI/CD flow (#17)
+- client-side Python packages (aiohttpd) no longer required in server environment (#18)
+- setuptools now builds client and server (#14)
+
 Version 0.10
 ============
 
