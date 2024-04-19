@@ -533,6 +533,8 @@ int main(int argc, char **argv) {
 	 * Initialize Python runtime
 	 */
 
+	/* Indicate to anyone who cares that we're running server-side */
+	setenv("TUBER_SERVER", "1", 1);
 	py::scoped_interpreter python;
 
 	/* By default, capture warnings */

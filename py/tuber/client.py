@@ -10,13 +10,11 @@ import textwrap
 import types
 import warnings
 
+from . import TuberError, TuberStateError, TuberRemoteError
 from .codecs import wrap_bytes_for_json, cbor_augment_encode, cbor_tag_decode
 
 
 __all__ = [
-    "TuberError",
-    "TuberStateError",
-    "TuberRemoteError",
     "TuberResult",
     "TuberObject",
     "resolve",
@@ -57,18 +55,6 @@ async def resolve_all(hostname: str, accept_types: list[str] | None = None):
     for objname in instance._tuber_meta.objects:
         await getattr(instance, objname).tuber_resolve()
     return instance
-
-
-class TuberError(Exception):
-    pass
-
-
-class TuberStateError(TuberError):
-    pass
-
-
-class TuberRemoteError(TuberError):
-    pass
 
 
 class TuberResult:
