@@ -118,6 +118,7 @@ class Context(object):
     def __init__(
         self,
         obj: "TuberObject" | None = None,
+        *,
         uri: str | None = None,
         accept_types: list[str] | None = None,
         **ctx_kwargs,

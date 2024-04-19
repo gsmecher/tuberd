@@ -236,7 +236,7 @@ static py::dict tuber_server_invoke(py::dict &registry,
 		fmt::print(stderr, "Delegating json {} to describe() slowpath.\n", call);
 
 	/* Slow path: object metadata, properties */
-	return py::eval("describe")(registry, call);
+	return py::eval("tuber.server.describe")(registry, call);
 }
 
 /* Responder for tuber resources exported via JSON.
@@ -493,9 +493,6 @@ int main(int argc, char **argv) {
 		case 'p':
 			port = std::stoi(optarg);
 			break;
-		case 'm':
-			preamble = std::string(optarg);
-			break;
 		case 'r':
 			registry = std::string(optarg);
 			break;
@@ -518,8 +515,6 @@ int main(int argc, char **argv) {
 			PRINTOPT("--orjson-with-numpy",
 			    "use ORJSON module with fast NumPy serialization support");
 			PRINTOPT2("-p [ --port ] PORT", "port", port);
-			PRINTOPT2("--preamble PATH", "location of slow-path Python code",
-			    preamble);
 			PRINTOPT2("--registry PATH", "location of registry Python code",
 			    registry);
 			PRINTOPT2("-w [ --webroot ] PATH",
@@ -537,15 +532,28 @@ int main(int argc, char **argv) {
 	setenv("TUBER_SERVER", "1", 1);
 	py::scoped_interpreter python;
 
+	/* The following fixups need these */
+	py::exec("import sys, os, sysconfig");
+
+	/* Add cwd to PYTHONPATH */
+	py::exec("sys.path.append('.');");
+
+	/* Ensure site.ENABLE_USER_SITE. This is a backwards compatibility
+	 * thing; current pybind11 doesn't need it. */
+	py::exec("sys.path.append("
+		"os.path.expanduser("
+			"'~/.local/lib/python{ver}/site-packages'"
+				".format(ver=sysconfig.get_python_version())))");
+
 	/* By default, capture warnings */
 	py::module warnings = py::module::import("warnings");
 	warnings.attr("showwarning") = py::cpp_function(showwarning);
 
 	/* Learn how the Python half lives */
 	try {
-		py::eval_file(preamble);
+		py::exec("import tuber.server");
 	} catch(std::exception const& e) {
-		fmt::print(stderr, "Error executing preamble {}!\n({})\n", preamble, e.what());
+		fmt::print("Failed to import tuber.server!");
 		return 2;
 	}
 
@@ -567,7 +575,7 @@ int main(int argc, char **argv) {
 		py::module json = py::module::import(json_module.c_str());
 		py::object py_loads = json.attr("loads");
 		py::object py_dumps = json.attr("dumps");
-		py::object fix_bytes = py::eval("wrap_bytes_for_json");
+		py::object fix_bytes = py::eval("tuber.server.wrap_bytes_for_json");
 
 		Codec::loads_t json_loads = [py_loads](std::string s) { return py_loads(s); };
 		Codec::dumps_t json_dumps = [py_dumps, fix_bytes](py::object o) {
@@ -592,8 +600,8 @@ int main(int argc, char **argv) {
 		py::module cbor = py::module::import("cbor2");
 		py::object py_loads = cbor.attr("loads");
 		py::object py_dumps = cbor.attr("dumps");
-		py::object extra_encode = py::eval("cbor_augment_encode");
-		py::object extra_decode = py::eval("cbor_tag_decode");
+		py::object extra_encode = py::eval("tuber.server.cbor_augment_encode");
+		py::object extra_decode = py::eval("tuber.server.cbor_tag_decode");
 		Codec::loads_t cbor_loads = [py_loads, extra_decode](std::string s) {
 			return py_loads(s, py::arg("tag_hook")=extra_decode);
 		};
