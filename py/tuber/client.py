@@ -2,26 +2,35 @@
 Tuber object interface
 """
 
+from __future__ import annotations
 import aiohttp
 import asyncio
 from collections.abc import Mapping
 import textwrap
 import types
-from typing import List, Dict, Tuple
 import warnings
 
 from . import TuberError, TuberStateError, TuberRemoteError
 from .codecs import wrap_bytes_for_json, cbor_augment_encode, cbor_tag_decode
 
 
-async def resolve(objname: str, hostname: str, accept_types: List[str] | None = None):
+__all__ = [
+    "TuberObject",
+    "resolve",
+]
+
+
+async def resolve(hostname: str, objname: str | None = None, accept_types: list[str] | None = None):
     """Create a local reference to a networked resource.
 
     This is the recommended way to connect to remote tuberd instances.
     """
 
-    instance = TuberObject(objname, f"http://{hostname}/tuber", accept_types=accept_types)
+    instance = TuberObject(objname, uri=f"http://{hostname}/tuber", accept_types=accept_types)
     await instance.tuber_resolve()
+    if objname is None:
+        for obj in instance._tuber_meta.objects:
+            await getattr(instance, obj).tuber_resolve()
     return instance
 
 
@@ -106,9 +115,21 @@ class Context(object):
     up to reduce roundtrips.
     """
 
-    def __init__(self, obj: "TuberObject", accept_types: List[str] | None = None, **ctx_kwargs):
-        self.calls: List[Tuple[Dict, asyncio.Future]] = []
+    def __init__(
+        self,
+        obj: "TuberObject" | None = None,
+        uri: str | None = None,
+        accept_types: list[str] | None = None,
+        **ctx_kwargs,
+    ):
+        self.calls: list[tuple[dict, asyncio.Future]] = []
         self.obj = obj
+        if obj is None:
+            if uri is None:
+                raise ValueError("Argument 'uri' required if 'obj' not provided")
+            self.uri = uri
+        else:
+            self.uri = self.obj._tuber_uri
         if accept_types is None:
             self.accept_types = list(AcceptTypes.keys())
         else:
@@ -173,7 +194,7 @@ class Context(object):
         # Create a HTTP request to complete the call. This is a coroutine,
         # so we queue the call and then suspend execution (via 'yield')
         # until it's complete.
-        async with cs.post(self.obj._tuber_uri, json=calls, headers=headers) as resp:
+        async with cs.post(self.uri, json=calls, headers=headers) as resp:
             raw_out = await resp.read()
             if not resp.ok:
                 try:
@@ -221,7 +242,7 @@ class Context(object):
         return [await f for f in futures]
 
     def __getattr__(self, name):
-        if attribute_blacklisted(name):
+        if attribute_blacklisted(name) or self.obj is None:
             raise AttributeError(f"{name} is not a valid method or property!")
 
         # Queue methods calls.
@@ -250,7 +271,7 @@ class TuberObject:
     To use it, you should subclass this TuberObject.
     """
 
-    def __init__(self, objname: str | None, uri: str, accept_types: List[str] | None = None):
+    def __init__(self, objname: str | None, *, uri: str, accept_types: list[str] | None = None):
         self._tuber_objname = objname
         self._tuber_uri = uri
         self._accept_types = accept_types
@@ -268,6 +289,8 @@ class TuberObject:
         """Provide a list of what's here. (Used for tab-completion.)"""
 
         attrs = dir(super(TuberObject, self))
+        if hasattr(self._tuber_meta, "objects"):
+            return sorted(attrs + self._tuber_meta.objects)
         return sorted(attrs + self._tuber_meta.properties + self._tuber_meta.methods)
 
     async def tuber_resolve(self):
@@ -291,16 +314,19 @@ class TuberObject:
                 meta = await ctx()
                 meta = meta[0]
 
-                for p in meta.properties:
-                    ctx._add_call(object=self._tuber_objname, property=p)
-                prop_list = await ctx()
+                if self._tuber_objname is not None:
+                    for p in meta.properties:
+                        ctx._add_call(object=self._tuber_objname, property=p)
+                    prop_list = await ctx()
 
-                for m in meta.methods:
-                    ctx._add_call(object=self._tuber_objname, property=m)
-                meth_list = await ctx()
+                    for m in meta.methods:
+                        ctx._add_call(object=self._tuber_objname, property=m)
+                    meth_list = await ctx()
 
-                props = dict(zip(meta.properties, prop_list))
-                methods = dict(zip(meta.methods, meth_list))
+                    props = dict(zip(meta.properties, prop_list))
+                    methods = dict(zip(meta.methods, meth_list))
+                else:
+                    props = methods = None
 
             self._tuber_meta = meta
             self._tuber_meta_properties = props
@@ -329,6 +355,14 @@ class TuberObject:
                 e,
                 "No metadata! Did you forget to call tuber_resolve()?",
             )
+
+        # Top-level registry entries
+        if hasattr(meta, "objects"):
+            if name not in meta.objects:
+                raise AttributeError(f"'{name}' is not a valid attribute!")
+            obj = TuberObject(name, uri=self._tuber_uri, accept_types=self._accept_types)
+            setattr(self, name, obj)
+            return getattr(self, name)
 
         if name not in meta.methods and name not in meta.properties:
             raise AttributeError(f"'{name}' is not a valid method or property!")
