@@ -1,2 +1,29 @@
+[build-system]
+requires = [
+    "cmake>=3.12",
+    "pybind11",
+    "setuptools>=42",
+    "wheel",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name='tuber'
+description='Serve Python (or C++) objects across a LAN using something like JSON-RPC'
+version='0.10'
+authors=[
+	{name="Graeme Smecher", email="gsmecher@threespeedlogic.com"},
+]
+urls={source="https://github.com/gsmecher/tuber"}
+classifiers=[
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: BSD License",
+    "Operating System :: OS Independent",
+]
+license = {file="LICENSE"}
+
+[options]
+package_dir={tuber="py"}
+
 [tool.black]
 line-length = 120

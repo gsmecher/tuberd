@@ -1,5 +1,8 @@
 CMakeFiles/
 CMakeCache.txt
+CTestTestfile.cmake
+DartConfiguration.tcl
+Testing/
 Makefile
 build/
 dist/
