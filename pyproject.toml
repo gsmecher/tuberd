@@ -3,6 +3,7 @@ requires = [
     "cmake>=3.12",
     "pybind11",
     "setuptools>=42",
+    "setuptools_scm[toml]>=6.3",
     "wheel",
 ]
 build-backend = "setuptools.build_meta"
@@ -10,7 +11,6 @@ build-backend = "setuptools.build_meta"
 [project]
 name='tuber'
 description='Serve Python (or C++) objects across a LAN using something like JSON-RPC'
-version='0.10'
 authors=[
 	{name="Graeme Smecher", email="gsmecher@threespeedlogic.com"},
 ]
@@ -21,9 +21,12 @@ classifiers=[
     "Operating System :: OS Independent",
 ]
 license = {file="LICENSE"}
+dynamic = ["version"]
 
 [options]
 package_dir={tuber="py"}
+
+[tool.setuptools_scm]
 
 [tool.black]
 line-length = 120
