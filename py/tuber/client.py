@@ -282,7 +282,8 @@ class TuberObject:
 
         Overload this method to create child objects using different subclasses.
         """
-
+        if self._tuber_objname is not None:
+            raise NotImplementedError
         return TuberObject(objname, uri=self._tuber_uri, accept_types=self._accept_types)
 
     @property
