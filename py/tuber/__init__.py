@@ -1,6 +1,3 @@
-import os
-
-
 class TuberError(Exception):
     pass
 
@@ -30,8 +27,10 @@ try:
 
     __all__ += ["TuberObject", "resolve"]
 except ImportError as ie:
+    import os
+
     if "TUBER_SERVER" not in os.environ:
-        raise e
+        raise ie
 
 
 # vim: sts=4 ts=4 sw=4 tw=78 smarttab expandtab
