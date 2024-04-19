@@ -559,4 +559,4 @@ async def test_tuberpy_resolve_all(tuber_call, accept_types):
     """Ensure resolve_all finds all registry entries"""
     s = await tuber.resolve_all(TUBERD_HOSTNAME, accept_types)
 
-    assert list(s) == list(registry)
+    assert set(dir(s)) >= set(registry)
