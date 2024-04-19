@@ -1,20 +1,6 @@
 import inspect
-import sys
-import os
-import sysconfig
-import site
 
-from tuber.codecs import wrap_bytes_for_json, cbor_augment_encode, cbor_tag_decode
-
-
-# Although upstream pybind11 allows user sites (check site.ENABLE_USER_SITE),
-# older versions did not.
-ver = sysconfig.get_python_version()
-sys.path.append(os.path.expanduser(f"~/.local/lib/python{ver}/site-packages"))
-
-# Similarly, the working directory is a reasonable expectation not met by some
-# versions of pybind11.
-sys.path.append(".")
+from .codecs import wrap_bytes_for_json, cbor_augment_encode, cbor_tag_decode
 
 
 def result_response(arg=None, **kwargs):

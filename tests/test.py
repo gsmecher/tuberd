@@ -124,13 +124,11 @@ def tuberd(pytestconfig):
     src_dir = pathlib.Path(os.environ.get("CMAKE_SOURCE_DIR", "."))
 
     tuberd = bin_dir / "tuberd"
-    preamble = src_dir / "py/preamble.py"
     registry = src_dir / "tests/test.py"
 
     argv = [
         f"{tuberd}",
         f"-p{TUBERD_PORT}",
-        f"--preamble={preamble}",
         f"--registry={registry}",
     ]
 
