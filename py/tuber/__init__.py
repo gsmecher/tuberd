@@ -16,6 +16,12 @@ __all__ = [
     "TuberStateError",
 ]
 
+# version.py is auto-generated from setuptools_scm
+try:
+    from ._version import __version__, __version_tuple__
+except ImportError:
+    __version__ = "???"
+
 # The tuber module is imported in both server and client environments. Because
 # the server execution environment may be minimal, we may bump into
 # ModuleNotFoundErrors in client code - which we may want to ignore.

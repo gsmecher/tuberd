@@ -2,7 +2,7 @@
 requires = [
     "cmake>=3.12",
     "pybind11",
-    "setuptools>=42",
+    "setuptools>=61",
     "setuptools_scm[toml]>=6.3",
     "wheel",
 ]
@@ -27,6 +27,7 @@ dynamic = ["version"]
 package_dir={tuber="py"}
 
 [tool.setuptools_scm]
+version_file = "py/tuber/_version.py"
 
 [tool.black]
 line-length = 120
