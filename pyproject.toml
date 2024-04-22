@@ -27,7 +27,8 @@ dynamic = ["version"]
 package_dir={tuber="py"}
 
 [tool.setuptools_scm]
-version_file = "py/tuber/_version.py"
+#version_file = "py/tuber/_version.py"  # version 8.0.0 and newer
+write_to = "py/tuber/_version.py"  # version 7.1.0 and older
 
 [tool.black]
 line-length = 120
