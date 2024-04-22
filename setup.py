@@ -12,6 +12,7 @@ from pathlib import Path
 from setuptools import Extension, setup
 from setuptools.command.build_ext import build_ext
 from setuptools.command.install_scripts import install_scripts
+from setuptools.command.install import install
 
 # Convert distutils platform specifiers to CMake -A arguments
 PLAT_TO_CMAKE = {
@@ -55,8 +56,9 @@ class CMakeBuild(build_ext):
 
 class CMakeInstall(install_scripts):
     def run(self):
-        self.announce("Installing tuberd", level=3)
+        super().run()
 
+        self.announce("Installing tuberd", level=3)
         install_dir = Path(self.install_dir)
         if not install_dir.exists():
             install_dir.mkdir(parents=True)
@@ -64,7 +66,26 @@ class CMakeInstall(install_scripts):
         tuberd_src = self.get_finalized_command("build_ext").tuberd_path
         tuberd_dst = install_dir / "tuberd"
         self.copy_file(tuberd_src, tuberd_dst)
+
+
+class CMakeInstallHeaders(install):
+    def run(self):
         super().run()
+
+        self.announce("Installing support headers", level=3)
+
+        # Define the header files directory relative to the module
+        src_root = os.path.dirname(os.path.realpath(__file__))
+        headers_src = os.path.join(src_root, "include")
+        headers_dst = os.path.join(self.install_lib, "tuber/include")
+
+        # Create the destination directory if it does not exist
+        os.makedirs(headers_dst, exist_ok=True)
+
+        # Copy header files
+        for header in os.listdir(headers_src):
+            if header.endswith(".hpp"):
+                self.copy_file(os.path.join(headers_src, header), os.path.join(headers_dst, header))
 
 
 setup(
@@ -72,6 +93,8 @@ setup(
     cmdclass={
         "build_ext": CMakeBuild,
         "install_scripts": CMakeInstall,
+        "install": CMakeInstallHeaders,
     },
     packages=find_packages(),
+    package_data={"tuber": ["include/*.hpp"]},
 )
