@@ -1,7 +1,7 @@
 # Setup instructions for client (Python module) only. The server portion is
 # installed via CMake.
 
-from setuptools import setup
+from setuptools import setup, find_packages
 
 import os
 import re
@@ -73,4 +73,5 @@ setup(
         "build_ext": CMakeBuild,
         "install_scripts": CMakeInstall,
     },
+    packages=find_packages(),
 )
