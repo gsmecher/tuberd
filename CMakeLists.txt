@@ -33,7 +33,7 @@ add_test(NAME test-orjson-fastpath
 	COMMAND tests/test.py --orjson-with-numpy)
 
 set_tests_properties(test-native-json test-orjson-fastpath
-	PROPERTIES ENVIRONMENT "CMAKE_BINARY_DIR=${CMAKE_BINARY_DIR};CMAKE_SOURCE_DIR=${CMAKE_SOURCE_DIR};PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}/py")
+	PROPERTIES ENVIRONMENT "CMAKE_BINARY_DIR=${CMAKE_BINARY_DIR};CMAKE_SOURCE_DIR=${CMAKE_SOURCE_DIR};PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}")
 
 set_target_properties(tuberd PROPERTIES PUBLIC_HEADER "include/tuber_support.hpp")
 install(TARGETS tuberd PUBLIC_HEADER DESTINATION include)
