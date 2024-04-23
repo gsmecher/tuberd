@@ -1,3 +1,9 @@
+Version 0.12
+============
+
+- Headers are now properly included in binary builds (.whl files)
+- Corrected PYTHONPATH for "make test"; broken in 0.11.
+
 Version 0.11
 ============
 
