@@ -559,3 +559,19 @@ async def test_tuberpy_resolve_all(tuber_call, accept_types):
 
     assert set(dir(s)) >= set(registry)
     assert set(dir(s.Types)) >= set(dir(registry["Types"]))
+
+
+@pytest.mark.parametrize("accept_types", ACCEPT_TYPES)
+@pytest.mark.asyncio
+async def test_tuberpy_registry_context(tuber_call, accept_types):
+    """Ensure registry entries are accessible from top level context"""
+
+    s = await tuber.resolve(TUBERD_HOSTNAME, accept_types=accept_types)
+
+    async with s.tuber_context() as ctx:
+        ctx.Wrapper.increment(x=[1, 2, 3])
+        ctx.Types.integer_function()
+        r1, r2 = await ctx()
+
+    assert r1 == [2, 3, 4]
+    assert r2 == Types.INTEGER

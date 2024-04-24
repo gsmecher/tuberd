@@ -114,44 +114,54 @@ class Context(object):
 
     def __init__(
         self,
-        obj: "TuberObject" | None = None,
+        obj: "TuberObject",
         *,
-        uri: str | None = None,
         accept_types: list[str] | None = None,
+        parent: "Context" | None = None,
         **ctx_kwargs,
     ):
-        self.calls: list[tuple[dict, asyncio.Future]] = []
         self.obj = obj
-        if obj is None:
-            if uri is None:
-                raise ValueError("Argument 'uri' required if 'obj' not provided")
-            self.uri = uri
-        else:
+        self.parent = parent
+
+        if self.parent is None:
+            self.calls: list[tuple[dict, asyncio.Future]] = []
             self.uri = self.obj._tuber_uri
-        if accept_types is None:
-            self.accept_types = list(AcceptTypes.keys())
+            if accept_types is None:
+                self.accept_types = list(AcceptTypes.keys())
+            else:
+                for accept_type in accept_types:
+                    if accept_type not in AcceptTypes.keys():
+                        raise ValueError(f"Unsupported accept type: {accept_type}")
+                self.accept_types = accept_types
+            self.ctx_kwargs = ctx_kwargs
         else:
-            for accept_type in accept_types:
-                if accept_type not in AcceptTypes.keys():
-                    raise ValueError(f"Unsupported accept type: {accept_type}")
-            self.accept_types = accept_types
-        self.ctx_kwargs = ctx_kwargs
+            if self.obj._tuber_objname is None:
+                raise NotImplementedError
+            self.ctx_kwargs = dict(**self.parent.ctx_kwargs, **ctx_kwargs)
 
     async def __aenter__(self):
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Ensure the context is flushed."""
+        if self.parent is not None:
+            await self.parent()
+            return
         if self.calls:
             await self()
 
     def _add_call(self, **request):
+        if self.parent is not None:
+            return self.parent._add_call(**request)
         future = asyncio.Future()
         self.calls.append((request, future))
         return future
 
     async def __call__(self):
         """Break off a set of calls and return them for execution."""
+
+        if self.parent is not None:
+            return await self.parent()
 
         calls = []
         futures = []
@@ -240,8 +250,20 @@ class Context(object):
         return [await f for f in futures]
 
     def __getattr__(self, name):
-        if attribute_blacklisted(name) or self.obj is None:
+        if attribute_blacklisted(name):
             raise AttributeError(f"{name} is not a valid method or property!")
+
+        # Short-circuit for resolved objects
+        if self.obj._tuber_meta is not None:
+            # Parallel context-object attribute for tuber-object attributes
+            if self.obj._tuber_objname is None:
+                if name in getattr(self.obj._tuber_meta, "objects", []):
+                    ctx = self.__class__(getattr(self.obj, name), parent=self)
+                    setattr(self, name, ctx)
+                    return ctx
+
+            if name not in getattr(self.obj._tuber_meta, "methods", []):
+                raise AttributeError(f"{name} is not a valid method or property!")
 
         # Queue methods calls.
         def caller(*args, **kwargs):
@@ -275,8 +297,16 @@ class TuberObject:
         self._accept_types = accept_types
         self._tuber_meta = None
 
-    def tuber_context(self, **kwargs):
-        return Context(self, accept_types=self._accept_types, **kwargs)
+    def tuber_context(self, objname: str | None = None, **kwargs):
+        """Construct a tuber Context for this TuberObject instance, or for the
+        given child resource name, if supplied.  Object must be resolved for the
+        latter to succeed."""
+        if objname is not None and self._tuber_objname is not None:
+            raise NotImplementedError
+        ctx = Context(self, accept_types=self._accept_types, **kwargs)
+        if objname is not None:
+            return getattr(ctx, objname)
+        return ctx
 
     def object_factory(self, objname):
         """Construct a child TuberObject for the given resource name.
