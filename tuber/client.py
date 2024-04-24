@@ -127,6 +127,8 @@ class Context(object):
             self.calls: list[tuple[dict, asyncio.Future]] = []
             self.uri = self.obj._tuber_uri
             if accept_types is None:
+                accept_types = self.obj._accept_types
+            if accept_types is None:
                 self.accept_types = list(AcceptTypes.keys())
             else:
                 for accept_type in accept_types:
@@ -303,7 +305,7 @@ class TuberObject:
         latter to succeed."""
         if objname is not None and self._tuber_objname is not None:
             raise NotImplementedError
-        ctx = Context(self, accept_types=self._accept_types, **kwargs)
+        ctx = Context(self, **kwargs)
         if objname is not None:
             return getattr(ctx, objname)
         return ctx
