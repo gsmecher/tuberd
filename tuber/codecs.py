@@ -1,4 +1,5 @@
-from collections.abc import Sequence
+from collections.abc import Sequence, Mapping
+from collections import namedtuple
 import sys
 
 try:
@@ -8,12 +9,39 @@ try:
 except ImportError:
     have_numpy = False
 
+# Prefer SimpleJSON, but fall back on built-in
+try:
+    import simplejson as json
+except ImportError:
+    import json  # type: ignore[no-redef]
+
+try:
+    import orjson
+
+    have_orjson = True
+except ImportError:
+    have_orjson = False
+
 try:
     import cbor2
 
     have_cbor = True
 except ImportError:
     have_cbor = False
+
+
+class TuberResult:
+    def __init__(self, d):
+        "Allow dotted accessors, like an object"
+        self.__dict__.update(d)
+
+    def __iter__(self):
+        "Make the results object iterate as a list of keys, like a dict"
+        return iter(self.__dict__)
+
+    def __repr__(self):
+        "Return a concise representation string"
+        return repr(self.__dict__)
 
 
 def wrap_bytes_for_json(obj):
@@ -126,3 +154,75 @@ def cbor_tag_decode(dec, tag):
         arr = tag.value[1].reshape(tag.value[0], order="C" if tag.tag == 40 else "F")
         return arr
     return None
+
+
+# This variable is used to track the media types we are able to decode, mapping their names to
+# decoding functions. The interface of the decoding function is to take two arguments: a bytes-like
+# object containing the encoded data, and an encoding name (which may be None) given by the
+# character set information (if any) included in the Content-Type header attached to the data.
+AcceptTypes = {}
+
+# This variable is used to track the codecs enabled on the server, mapping their names to
+# decoding and encoding functions.  The interface for each should match that of json.loads() and
+# json.dumps(), respectively.
+Codecs = {}
+Codec = namedtuple("Codec", ["decode", "encode"])
+
+
+def decode_json(response_data, **kwargs):
+    return json.loads(response_data, **kwargs)
+
+
+def encode_json(obj, **kwargs):
+    return json.dumps(obj, default=wrap_bytes_for_json, **kwargs)
+
+
+Codecs["json"] = Codec(decode=decode_json, encode=encode_json)
+
+if have_orjson:
+    # If using orjson with NumPy, overload dumps with the right magic
+
+    def decode_orjson(response_data, **kwargs):
+        return orjson.loads(response_data, **kwargs)
+
+    def encode_orjson(obj, **kwargs):
+        if have_numpy:
+            kwargs["option"] = kwargs.get("option", 0) | orjson.OPT_SERIALIZE_NUMPY
+        return orjson.dumps(obj, default=wrap_bytes_for_json, **kwargs)
+
+    Codecs["orjson"] = Codec(decode=decode_orjson, encode=encode_orjson)
+
+
+def decode_json_client(response_data, encoding):
+    if encoding is None:  # guess the typical default if unspecified
+        encoding = "utf-8"
+
+    def ohook(obj):
+        if isinstance(obj, Mapping) and "bytes" in obj and (len(obj) == 1 or (len(obj) == 2 and "subtype" in obj)):
+            try:
+                return bytes(obj["bytes"])
+            except e as ValueError:
+                pass
+        return TuberResult(obj)
+
+    return decode_json(response_data.decode(encoding), object_hook=ohook)
+
+
+AcceptTypes["application/json"] = decode_json_client
+
+
+# Use cbor2 to handle CBOR, if available
+if have_cbor:
+
+    def decode_cbor(response_data, **kwargs):
+        return cbor2.loads(response_data, tag_hook=cbor_tag_decode, **kwargs)
+
+    def encode_cbor(obj, **kwargs):
+        return cbor2.dumps(obj, default=cbor_augment_encode, **kwargs)
+
+    Codecs["cbor"] = Codec(decode=decode_cbor, encode=encode_cbor)
+
+    def decode_cbor_client(response_data, encoding):
+        return decode_cbor(response_data, object_hook=lambda dec, data: TuberResult(data))
+
+    AcceptTypes["application/cbor"] = decode_cbor_client
