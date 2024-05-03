@@ -3,7 +3,6 @@ Tuber object interface
 """
 
 from __future__ import annotations
-import aiohttp
 import asyncio
 from collections.abc import Mapping
 import textwrap
@@ -16,18 +15,31 @@ from .codecs import wrap_bytes_for_json, cbor_augment_encode, cbor_tag_decode
 
 __all__ = [
     "TuberObject",
+    "SimpleTuberObject",
     "resolve",
+    "resolve_simple",
 ]
 
 
 async def resolve(hostname: str, objname: str | None = None, accept_types: list[str] | None = None):
     """Create a local reference to a networked resource.
 
-    This is the recommended way to connect to remote tuberd instances.
+    This is the recommended way to connect asynchronously to remote tuberd instances.
     """
 
-    instance = TuberObject(objname, uri=f"http://{hostname}/tuber", accept_types=accept_types)
+    instance = TuberObject(objname, hostname=hostname, accept_types=accept_types)
     await instance.tuber_resolve()
+    return instance
+
+
+def resolve_simple(hostname: str, objname: str | None = None, accept_types: list[str] | None = None):
+    """Create a local reference to a networked resource.
+
+    This is the recommended way to connect serially to remote tuberd instances.
+    """
+
+    instance = SimpleTuberObject(objname, hostname=hostname, accept_types=accept_types)
+    instance.tuber_resolve()
     return instance
 
 
@@ -105,29 +117,19 @@ def attribute_blacklisted(name):
     return False
 
 
-class Context(object):
-    """A context container for TuberCalls. Permits calls to be aggregated.
+class SimpleContext:
+    """A serial context container for TuberCalls. Permits calls to be aggregated.
 
     Commands are dispatched strictly in-order, but are automatically bundled
     up to reduce roundtrips.
     """
 
-    def __init__(
-        self,
-        obj: "TuberObject" | None = None,
-        *,
-        uri: str | None = None,
-        accept_types: list[str] | None = None,
-        **ctx_kwargs,
-    ):
-        self.calls: list[tuple[dict, asyncio.Future]] = []
+    def __init__(self, obj: "SimpleTuberObject", *, accept_types: list[str] | None = None, **ctx_kwargs):
+        self.calls: list[dict] = []
         self.obj = obj
-        if obj is None:
-            if uri is None:
-                raise ValueError("Argument 'uri' required if 'obj' not provided")
-            self.uri = uri
-        else:
-            self.uri = self.obj._tuber_uri
+        self.uri = f"http://{obj._tuber_host}/tuber"
+        if accept_types is None:
+            accept_types = self.obj._accept_types
         if accept_types is None:
             self.accept_types = list(AcceptTypes.keys())
         else:
@@ -137,6 +139,102 @@ class Context(object):
             self.accept_types = accept_types
         self.ctx_kwargs = ctx_kwargs
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.calls:
+            self()
+
+    def _add_call(self, **request):
+        self.calls.append(request)
+
+    def __getattr__(self, name):
+        if attribute_blacklisted(name):
+            raise AttributeError(f"{name} is not a valid method or property!")
+
+        # Queue methods calls.
+        def caller(*args, **kwargs):
+            # Add extra arguments where they're provided
+            kwargs.update(self.ctx_kwargs)
+
+            # ensure that a new unique future is returned
+            # each time this function is called
+            return self._add_call(object=self.obj._tuber_objname, method=name, args=args, kwargs=kwargs)
+
+        setattr(self, name, caller)
+        return caller
+
+    def __call__(self):
+        """Break off a set of calls and return them for execution."""
+
+        # An empty Context returns an empty list of calls
+        if not self.calls:
+            return []
+
+        calls = list(self.calls)
+        self.calls.clear()
+
+        import requests
+
+        # Declare the media types we want to allow getting back
+        headers = {"Accept": ", ".join(self.accept_types)}
+        # Create a HTTP request to complete the call.
+        with requests.post(self.uri, json=calls, headers=headers) as resp:
+            raw_out = resp.content
+            if not resp.ok:
+                try:
+                    text = resp.text
+                except Exception:
+                    raise TuberRemoteError(f"Request failed with status {resp.status_code}")
+                raise TuberRemoteError(f"Request failed with status {resp.status_code}: {text}")
+            content_type = resp.headers["Content-Type"]
+            # Check that the resulting media type is one which can actually be handled;
+            # this is slightly more liberal than checking that it is really among those we declared
+            if content_type not in AcceptTypes:
+                raise TuberError(f"Unexpected response content type: {content_type}")
+            json_out = AcceptTypes[content_type](raw_out, resp.apparent_encoding)
+
+        if hasattr(json_out, "error"):
+            # Oops - this is actually a server-side error that bubbles
+            # through. (See test_tuberpy_async_context_with_unserializable.)
+            # We made an array request, and received an object response
+            # because of an exception-catching scope in the server. Do the
+            # best we can.
+            raise TuberRemoteError(json_out.error.message)
+
+        results = []
+        for r in json_out:
+            # Always emit warnings, if any occurred
+            if hasattr(r, "warnings") and r.warnings:
+                for w in r.warnings:
+                    warnings.warn(w)
+
+            # Resolve either a result or an error
+            if hasattr(r, "error") and r.error:
+                raise TuberRemoteError(getattr(r.error, "message", "Unknown error"))
+
+            if hasattr(r, "result"):
+                results.append(r.result)
+            else:
+                raise TuberError("Result has no 'result' attribute")
+
+        # Return a list of results
+        return results
+
+
+class Context(SimpleContext):
+    """An asynchronous context container for TuberCalls. Permits calls to be
+    aggregated.
+
+    Commands are dispatched strictly in-order, but are automatically bundled
+    up to reduce roundtrips.
+    """
+
+    def __init__(self, obj: "TuberObject", **kwargs):
+        super().__init__(obj, **kwargs)
+        self.calls: list[tuple[dict, asyncio.Future]] = []
+
     async def __aenter__(self):
         return self
 
@@ -144,6 +242,12 @@ class Context(object):
         """Ensure the context is flushed."""
         if self.calls:
             await self()
+
+    def __enter__(self):
+        raise NotImplementedError
+
+    def __exit__(self):
+        raise NotImplementedError
 
     def _add_call(self, **request):
         future = asyncio.Future()
@@ -153,6 +257,10 @@ class Context(object):
     async def __call__(self):
         """Break off a set of calls and return them for execution."""
 
+        # An empty Context returns an empty list of calls
+        if not self.calls:
+            return []
+
         calls = []
         futures = []
         while self.calls:
@@ -161,12 +269,11 @@ class Context(object):
             calls.append(c)
             futures.append(f)
 
-        # An empty Context returns an empty list of calls
-        if not calls:
-            return []
-
         loop = asyncio.get_running_loop()
         if not hasattr(loop, "_tuber_session"):
+            # hide import for non-library package that may not be invoked
+            import aiohttp
+
             # Monkey-patch tuber session memory handling with the running event loop
             loop._tuber_session = aiohttp.ClientSession(json_serialize=json.dumps)
 
@@ -239,27 +346,120 @@ class Context(object):
         # Return a list of results
         return [await f for f in futures]
 
-    def __getattr__(self, name):
-        if attribute_blacklisted(name) or self.obj is None:
-            raise AttributeError(f"{name} is not a valid method or property!")
 
-        # Queue methods calls.
-        def caller(*args, **kwargs):
-            # Add extra arguments where they're provided
-            kwargs = kwargs.copy()
-            kwargs.update(self.ctx_kwargs)
+class SimpleTuberObject:
+    """A base class for serial TuberObjects.
 
-            # ensure that a new unique future is returned
-            # each time this function is called
-            future = self._add_call(object=self.obj._tuber_objname, method=name, args=args, kwargs=kwargs)
+    This is a great way of using Python to correspond with network resources
+    over a HTTP tunnel. It hides most of the gory details and makes your
+    networked resource look and behave like a local Python object.
 
-            return future
+    To use it, you should subclass this SimpleTuberObject.
+    """
 
-        setattr(self, name, caller)
-        return caller
+    _context_class = SimpleContext
+
+    def __init__(
+        self,
+        objname: str | None,
+        *,
+        hostname: str | None = None,
+        accept_types: list[str] | None = None,
+        parent: "SimpleTuberObject" | None = None,
+    ):
+        self._tuber_objname = objname
+        if parent is None:
+            assert hostname, "Argument 'hostname' required"
+            self._tuber_host = hostname
+            self._accept_types = accept_types
+        else:
+            self._tuber_host = parent._tuber_host
+            self._accept_types = parent._accept_types
+
+    def object_factory(self, objname):
+        """Construct a child TuberObject for the given resource name.
+
+        Overload this method to create child objects using different subclasses.
+        """
+        if self._tuber_objname is not None:
+            raise NotImplementedError
+        return self.__class__(objname, parent=self)
+
+    def tuber_context(self, **kwargs):
+        """Return a context manager for aggregating method calls on this object."""
+
+        return self._context_class(self, **kwargs)
+
+    def tuber_resolve(self, force=False):
+        """Retrieve metadata associated with the remote network resource.
+
+        This class retrieves object-wide metadata, which is used to build
+        up properties and methods with tab-completion and docstrings.
+        """
+        if not force:
+            try:
+                return (self._tuber_meta, self._tuber_meta_properties, self._tuber_meta_methods)
+            except AttributeError:
+                pass
+
+        with self.tuber_context() as ctx:
+            ctx._add_call(object=self._tuber_objname)
+            meta = ctx()
+            meta = meta[0]
+
+            if self._tuber_objname is not None:
+                for p in meta.properties:
+                    ctx._add_call(object=self._tuber_objname, property=p)
+                prop_list = ctx()
+
+                for m in meta.methods:
+                    ctx._add_call(object=self._tuber_objname, property=m)
+                meth_list = ctx()
+
+                props = dict(zip(meta.properties, prop_list))
+                methods = dict(zip(meta.methods, meth_list))
+            else:
+                props = methods = None
+
+        # Top-level registry entries
+        for objname in getattr(meta, "objects", []):
+            obj = self.object_factory(objname)
+            obj.tuber_resolve()
+            setattr(self, objname, obj)
+
+        for propname in getattr(meta, "properties", []):
+            setattr(self, propname, props[propname])
+
+        for methname in getattr(meta, "methods", []):
+            # Generate a callable prototype
+            def invoke_wrapper(name):
+                def invoke(self, *args, **kwargs):
+                    with self.tuber_context() as ctx:
+                        getattr(ctx, name)(*args, **kwargs)
+                        results = ctx()
+                    return results[0]
+
+                return invoke
+
+            invoke = invoke_wrapper(methname)
+
+            # Attach DocStrings, if provided and valid
+            try:
+                invoke.__doc__ = textwrap.dedent(methods[methname].__doc__)
+            except:
+                pass
+
+            # Associate as a class method.
+            setattr(self, methname, types.MethodType(invoke, self))
+
+        self.__doc__ = meta.__doc__
+        self._tuber_meta = meta
+        self._tuber_meta_properties = props
+        self._tuber_meta_methods = methods
+        return (meta, props, methods)
 
 
-class TuberObject:
+class TuberObject(SimpleTuberObject):
     """A base class for TuberObjects.
 
     This is a great way of using Python to correspond with network resources
@@ -269,29 +469,7 @@ class TuberObject:
     To use it, you should subclass this TuberObject.
     """
 
-    def __init__(self, objname: str | None, *, uri: str, accept_types: list[str] | None = None):
-        self._tuber_objname = objname
-        self._tuber_uri = uri
-        self._accept_types = accept_types
-        self._tuber_meta = None
-
-    def tuber_context(self, **kwargs):
-        return Context(self, accept_types=self._accept_types, **kwargs)
-
-    def object_factory(self, objname):
-        """Construct a child TuberObject for the given resource name.
-
-        Overload this method to create child objects using different subclasses.
-        """
-        if self._tuber_objname is not None:
-            raise NotImplementedError
-        return TuberObject(objname, uri=self._tuber_uri, accept_types=self._accept_types)
-
-    @property
-    def __doc__(self):
-        """Construct DocStrings using metadata from the underlying resource."""
-
-        return self._tuber_meta.__doc__
+    _context_class = Context
 
     async def tuber_resolve(self, force=False):
         """Retrieve metadata associated with the remote network resource.
@@ -354,6 +532,7 @@ class TuberObject:
             # Associate as a class method.
             setattr(self, methname, types.MethodType(invoke, self))
 
+        self.__doc__ = meta.__doc__
         self._tuber_meta = meta
         self._tuber_meta_properties = props
         self._tuber_meta_methods = methods

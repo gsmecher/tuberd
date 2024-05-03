@@ -28,10 +28,12 @@ except ImportError:
 try:
     from .client import (
         TuberObject,
+        SimpleTuberObject,
         resolve,
+        resolve_simple,
     )
 
-    __all__ += ["TuberObject", "resolve"]
+    __all__ += ["TuberObject", "SimpleTuberObject", "resolve", "resolve_simple"]
 except ImportError as ie:
     import os
 
