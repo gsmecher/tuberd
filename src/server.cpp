@@ -591,7 +591,7 @@ int main(int argc, char **argv) {
 		};
 		codecs.emplace(MIME_JSON, Codec{json_loads, json_dumps});
 	} catch(std::exception const& e) {
-		fmt::print(stderr, "Unable to import json codec ({})\n", e.what());
+		fmt::print(stderr, "Unable to import {} codec ({})\n", json_module, e.what());
 		return 4;
 	}
 
