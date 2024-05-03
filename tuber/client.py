@@ -4,13 +4,12 @@ Tuber object interface
 
 from __future__ import annotations
 import asyncio
-from collections.abc import Mapping
 import textwrap
 import types
 import warnings
 
 from . import TuberError, TuberStateError, TuberRemoteError
-from .codecs import wrap_bytes_for_json, cbor_augment_encode, cbor_tag_decode
+from .codecs import AcceptTypes, Codecs
 
 
 __all__ = [
@@ -41,62 +40,6 @@ def resolve_simple(hostname: str, objname: str | None = None, accept_types: list
     instance = SimpleTuberObject(objname, hostname=hostname, accept_types=accept_types)
     instance.tuber_resolve()
     return instance
-
-
-class TuberResult:
-    def __init__(self, d):
-        "Allow dotted accessors, like an object"
-        self.__dict__.update(d)
-
-    def __iter__(self):
-        "Make the results object iterate as a list of keys, like a dict"
-        return iter(self.__dict__)
-
-    def __repr__(self):
-        "Return a concise representation string"
-        return repr(self.__dict__)
-
-
-# This variable is used to track the media types we are able to decode, mapping their names to
-# decoding functions. The interface of the decoding function is to take two arguments: a bytes-like
-# object containing the encoded data, and an encoding name (which may be None) given by the
-# character set information (if any) included in the Content-Type header attached to the data.
-AcceptTypes = {}
-
-# Prefer SimpleJSON, but fall back on built-in
-try:
-    import simplejson as json
-except ModuleNotFoundError:
-    import json  # type: ignore[no-redef]
-
-
-def decode_json(response_data, encoding):
-    if encoding is None:  # guess the typical default if unspecified
-        encoding = "utf-8"
-
-    def ohook(obj):
-        if isinstance(obj, Mapping) and "bytes" in obj and (len(obj) == 1 or (len(obj) == 2 and "subtype" in obj)):
-            try:
-                return bytes(obj["bytes"])
-            except e as ValueError:
-                pass
-        return TuberResult(obj)
-
-    return json.JSONDecoder(object_hook=ohook).decode(response_data.decode(encoding))
-
-
-AcceptTypes["application/json"] = decode_json
-
-# Use cbor2 to handle CBOR, if available
-try:
-    import cbor2 as cbor
-
-    def decode_cbor(response_data, encoding):
-        return cbor.loads(response_data, object_hook=lambda dec, data: TuberResult(data), tag_hook=cbor_tag_decode)
-
-    AcceptTypes["application/cbor"] = decode_cbor
-except:
-    pass
 
 
 def attribute_blacklisted(name):
@@ -275,7 +218,7 @@ class Context(SimpleContext):
             import aiohttp
 
             # Monkey-patch tuber session memory handling with the running event loop
-            loop._tuber_session = aiohttp.ClientSession(json_serialize=json.dumps)
+            loop._tuber_session = aiohttp.ClientSession(json_serialize=Codecs["json"].encode)
 
             # Ensure that ClientSession.close() is called when the loop is
             # closed.  ClientSession.__del__ does not close the session, so it

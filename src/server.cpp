@@ -566,47 +566,43 @@ int main(int argc, char **argv) {
 	}
 
 	std::map<std::string, Codec> codecs;
+	py::dict py_codecs;
+
+	try {
+		py_codecs = py::eval("tuber.server.Codecs");
+	} catch(std::exception const& e) {
+		fmt::print(stderr, "Unable to import server codecs ({})\n", e.what());
+		return 4;
+	}
+
 	/* Import JSON dumps function so we can use it */
 	try {
 		if(orjson_with_numpy)
 			json_module = "orjson";
 
 		/* Import Python loads/dumps */
-		py::module json = py::module::import(json_module.c_str());
-		py::object py_loads = json.attr("loads");
-		py::object py_dumps = json.attr("dumps");
-		py::object fix_bytes = py::eval("tuber.server.wrap_bytes_for_json");
+		py::object py_codec = py_codecs[json_module.c_str()];
+		py::object py_loads = py_codec.attr("decode");
+		py::object py_dumps = py_codec.attr("encode");
 
 		Codec::loads_t json_loads = [py_loads](std::string s) { return py_loads(s); };
-		Codec::dumps_t json_dumps = [py_dumps, fix_bytes](py::object o) {
-			return py_dumps(o, py::arg("default")=fix_bytes).cast<std::string>();
+		Codec::dumps_t json_dumps = [py_dumps](py::object o) {
+			return py_dumps(o).cast<std::string>();
 		};
-
-		/* If using orjson with NumPy, overload dumps with the right magic. */
-		if(orjson_with_numpy) {
-			py::object OPT_SERIALIZE_NUMPY = json.attr("OPT_SERIALIZE_NUMPY");
-			json_dumps = [py_dumps, OPT_SERIALIZE_NUMPY, fix_bytes](py::object o) {
-				return py_dumps(o, fix_bytes, OPT_SERIALIZE_NUMPY).cast<std::string>();
-			};
-		}
 		codecs.emplace(MIME_JSON, Codec{json_loads, json_dumps});
 	} catch(std::exception const& e) {
-		fmt::print(stderr, "Unable to import loads/dumps from module {} ({})\n",
-				json_module, e.what());
+		fmt::print(stderr, "Unable to import {} codec ({})\n", json_module, e.what());
 		return 4;
 	}
 
 	try{
-		py::module cbor = py::module::import("cbor2");
-		py::object py_loads = cbor.attr("loads");
-		py::object py_dumps = cbor.attr("dumps");
-		py::object extra_encode = py::eval("tuber.server.cbor_augment_encode");
-		py::object extra_decode = py::eval("tuber.server.cbor_tag_decode");
-		Codec::loads_t cbor_loads = [py_loads, extra_decode](std::string s) {
-			return py_loads(s, py::arg("tag_hook")=extra_decode);
-		};
-		Codec::dumps_t cbor_dumps = [py_dumps, extra_encode](py::object o) {
-			return py_dumps(o, py::arg("default")=extra_encode).cast<std::string>();
+		py::object py_codec = py_codecs["cbor"];
+		py::object py_loads = py_codec.attr("decode");
+		py::object py_dumps = py_codec.attr("encode");
+
+		Codec::loads_t cbor_loads = [py_loads](std::string s) { return py_loads(s); };
+		Codec::dumps_t cbor_dumps = [py_dumps](py::object o) {
+			return py_dumps(o).cast<std::string>();
 		};
 		codecs.emplace(MIME_CBOR, Codec{cbor_loads, cbor_dumps});
 	} catch(std::exception const& e) {
