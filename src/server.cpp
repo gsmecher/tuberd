@@ -571,7 +571,7 @@ int main(int argc, char **argv) {
 	try {
 		py_codecs = py::eval("tuber.server.Codecs");
 	} catch(std::exception const& e) {
-		fmt::print(stderr, "Unable to import sever codecs ({})\n", e.what());
+		fmt::print(stderr, "Unable to import server codecs ({})\n", e.what());
 		return 4;
 	}
 
