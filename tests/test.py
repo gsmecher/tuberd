@@ -621,3 +621,37 @@ async def test_tuberpy_resolve_all(tuber_call, accept_types, simple):
 
     assert set(dir(s)) >= set(registry)
     assert set(dir(s.Types)) >= set(dir(registry["Types"]))
+
+
+@pytest.mark.parametrize("simple", [True, False])
+@pytest.mark.parametrize("accept_types", ACCEPT_TYPES)
+@pytest.mark.asyncio
+async def test_tuberpy_registry_context(tuber_call, accept_types, simple):
+    """Ensure registry entries are accessible from top level context"""
+
+    s = await resolve(accept_types=accept_types, simple=simple)
+
+    if simple:
+        with s.tuber_context() as ctx:
+            ctx.Wrapper.increment(x=[1, 2, 3])
+            ctx.Types.integer_function()
+            r1, r2 = ctx()
+
+            with pytest.raises(AttributeError):
+                ctx.Wrapper.not_a_function()
+            with pytest.raises(AttributeError):
+                ctx.NotAnAttribute.not_a_function()
+
+    else:
+        async with s.tuber_context() as ctx:
+            ctx.Wrapper.increment(x=[1, 2, 3])
+            ctx.Types.integer_function()
+            r1, r2 = await ctx()
+
+            with pytest.raises(AttributeError):
+                ctx.Wrapper.not_a_function()
+            with pytest.raises(AttributeError):
+                ctx.NotAnAttribute.not_a_function()
+
+    assert r1 == [2, 3, 4]
+    assert r2 == Types.INTEGER

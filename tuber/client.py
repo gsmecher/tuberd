@@ -60,6 +60,33 @@ def attribute_blacklisted(name):
     return False
 
 
+class SubContext:
+    """A container for attributes of a top-level (registry) Context object"""
+
+    def __init__(self, objname: str, methods: list[str] | None, parent: "SimpleContext", **kwargs):
+        self.objname = objname
+        self.methods = methods
+        self.parent = parent
+        self.ctx_kwargs = kwargs
+
+    def __getattr__(self, name: str):
+        if attribute_blacklisted(name):
+            raise AttributeError(f"{name} is not a valid method or property!")
+
+        # Short-circuit for resolved objects
+        if self.methods is not None and name not in self.methods:
+            raise AttributeError(f"{name} is not a valid method or property!")
+
+        # Call the parent context with this object name and its method
+        def caller(*args, **kwargs):
+            kwargs.update(self.parent.ctx_kwargs)
+            kwargs.update(self.ctx_kwargs)
+            return self.parent._add_call(object=self.objname, method=name, args=args, kwargs=kwargs)
+
+        setattr(self, name, caller)
+        return caller
+
+
 class SimpleContext:
     """A serial context container for TuberCalls. Permits calls to be aggregated.
 
@@ -94,6 +121,33 @@ class SimpleContext:
 
     def __getattr__(self, name):
         if attribute_blacklisted(name):
+            raise AttributeError(f"{name} is not a valid method or property!")
+
+        # Queue methods of registry entries using the top-level registry context
+        if self.obj._tuber_objname is None:
+            # Short-circuit for resolved objects
+            try:
+                objects = self.obj._tuber_meta.objects
+            except AttributeError:
+                objects = None
+            if objects is not None and name not in objects:
+                raise AttributeError(f"{name} is not a valid attribute!")
+
+            try:
+                methods = getattr(self.obj, name)._tuber_meta.methods
+            except AttributeError:
+                methods = None
+
+            ctx = SubContext(name, methods=methods, parent=self)
+            setattr(self, name, ctx)
+            return ctx
+
+        # Short-circuit for resolved objects
+        try:
+            methods = self.obj._tuber_meta.methods
+        except AttributeError:
+            methods = None
+        if methods is not None and name not in methods:
             raise AttributeError(f"{name} is not a valid method or property!")
 
         # Queue methods calls.
