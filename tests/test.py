@@ -657,6 +657,26 @@ async def test_tuberpy_registry_context(tuber_call, accept_types, simple):
     assert r2 == Types.INTEGER
 
 
+@pytest.mark.parametrize("simple", [True])
+@pytest.mark.parametrize("accept_types", ACCEPT_TYPES)
+@pytest.mark.asyncio
+async def test_tuberpy_fake_async(tuber_call, accept_types, simple):
+    """Ensure async execution works with simple context"""
+
+    s = await resolve(accept_types=accept_types, simple=True)
+
+    with s.tuber_context() as ctx:
+        ctx.Wrapper.increment(x=[1, 2, 3])
+        resp1 = ctx.send()
+        ctx.Types.integer_function()
+        resp2 = ctx.send()
+
+    r1, r2 = map(lambda resp: ctx.receive(resp)[0], [resp1, resp2])
+
+    assert r1 == [2, 3, 4]
+    assert r2 == Types.INTEGER
+
+
 @pytest.mark.parametrize("simple", [True, False])
 @pytest.mark.parametrize("accept_types", ACCEPT_TYPES)
 @pytest.mark.asyncio

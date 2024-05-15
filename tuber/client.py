@@ -162,7 +162,7 @@ class SimpleContext:
         setattr(self, name, caller)
         return caller
 
-    def __call__(self, warn_remote_errors=False):
+    def send(self):
         """Break off a set of calls and return them for execution."""
 
         # An empty Context returns an empty list of calls
@@ -177,7 +177,16 @@ class SimpleContext:
         # Declare the media types we want to allow getting back
         headers = {"Accept": ", ".join(self.accept_types)}
         # Create a HTTP request to complete the call.
-        with requests.post(self.uri, json=calls, headers=headers) as resp:
+        return requests.post(self.uri, json=calls, headers=headers)
+
+    def receive(self, response, warn_remote_errors=False):
+        """Parse response from a previously sent HTTP request."""
+
+        # An empty Context returns an empty list of calls
+        if response is None or response == []:
+            return []
+
+        with response as resp:
             raw_out = resp.content
             if not resp.ok:
                 try:
@@ -222,6 +231,11 @@ class SimpleContext:
 
         # Return a list of results
         return results
+
+    def __call__(self, warn_remote_errors=False):
+        """Break off a set of calls and return them for execution."""
+
+        return self.receive(self.send(), warn_remote_errors=warn_remote_errors)
 
 
 class Context(SimpleContext):
