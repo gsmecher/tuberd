@@ -162,7 +162,7 @@ class SimpleContext:
         setattr(self, name, caller)
         return caller
 
-    def __call__(self):
+    def __call__(self, warn_remote_errors=False):
         """Break off a set of calls and return them for execution."""
 
         # An empty Context returns an empty list of calls
@@ -209,9 +209,13 @@ class SimpleContext:
 
             # Resolve either a result or an error
             if hasattr(r, "error") and r.error:
-                raise TuberRemoteError(getattr(r.error, "message", "Unknown error"))
-
-            if hasattr(r, "result"):
+                errmsg = getattr(r.error, "message", "Unknown error")
+                if warn_remote_errors:
+                    warnings.warn(errmsg)
+                    results.append(None)
+                else:
+                    raise TuberRemoteError(errmsg)
+            elif hasattr(r, "result"):
                 results.append(r.result)
             else:
                 raise TuberError("Result has no 'result' attribute")
@@ -251,7 +255,7 @@ class Context(SimpleContext):
         self.calls.append((request, future))
         return future
 
-    async def __call__(self):
+    async def __call__(self, warn_remote_errors=False):
         """Break off a set of calls and return them for execution."""
 
         # An empty Context returns an empty list of calls
@@ -320,7 +324,6 @@ class Context(SimpleContext):
             raise TuberRemoteError(json_out.error.message)
 
         # Resolve futures
-        results = []
         for f, r in zip(futures, json_out):
             # Always emit warnings, if any occurred
             if hasattr(r, "warnings") and r.warnings:
@@ -329,13 +332,14 @@ class Context(SimpleContext):
 
             # Resolve either a result or an error
             if hasattr(r, "error") and r.error:
-                if hasattr(r.error, "message"):
-                    f.set_exception(TuberRemoteError(r.error.message))
+                errmsg = getattr(r.error, "message", "Unknown error")
+                if warn_remote_errors:
+                    warnings.warn(errmsg)
+                    f.set_result(None)
                 else:
-                    f.set_exception(TuberRemoteError("Unknown error"))
+                    f.set_exception(TuberRemoteError(errmsg))
             else:
                 if hasattr(r, "result"):
-                    results.append(r.result)
                     f.set_result(r.result)
                 else:
                     f.set_exception(TuberError("Result has no 'result' attribute"))

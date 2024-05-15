@@ -655,3 +655,22 @@ async def test_tuberpy_registry_context(tuber_call, accept_types, simple):
 
     assert r1 == [2, 3, 4]
     assert r2 == Types.INTEGER
+
+
+@pytest.mark.parametrize("simple", [True, False])
+@pytest.mark.parametrize("accept_types", ACCEPT_TYPES)
+@pytest.mark.asyncio
+async def test_tuberpy_noerr(tuber_call, accept_types, simple):
+    """Ensure errors are turned into warnings"""
+    s = await resolve("Warnings", accept_types, simple)
+
+    with pytest.warns(match="This is a warning"), pytest.warns(match="Oops!"):
+        if simple:
+            with s.tuber_context() as ctx:
+                ctx.single_warning("This is a warning", error=True)
+                ctx(warn_remote_errors=True)
+
+        else:
+            async with s.tuber_context() as ctx:
+                ctx.single_warning("This is a warning", error=True)
+                await ctx(warn_remote_errors=True)
