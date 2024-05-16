@@ -677,20 +677,41 @@ async def test_tuberpy_fake_async(tuber_call, accept_types, simple):
     assert r2 == Types.INTEGER
 
 
+@pytest.mark.parametrize("continue_on_error", [True, False])
 @pytest.mark.parametrize("simple", [True, False])
 @pytest.mark.parametrize("accept_types", ACCEPT_TYPES)
 @pytest.mark.asyncio
-async def test_tuberpy_noerr(tuber_call, accept_types, simple):
+async def test_tuberpy_continue_errors(tuber_call, accept_types, simple, continue_on_error):
     """Ensure errors are turned into warnings"""
-    s = await resolve("Warnings", accept_types, simple)
+    s = await resolve(accept_types=accept_types, simple=simple)
 
-    with pytest.warns(match="This is a warning"), pytest.warns(match="Oops!"):
+    with pytest.warns(match="This is a warning"):
         if simple:
             with s.tuber_context() as ctx:
-                ctx.single_warning("This is a warning", error=True)
-                ctx(warn_remote_errors=True)
-
+                ctx.Wrapper.increment([1, 2, 3])  # fine
+                ctx.Warnings.single_warning("This is a warning", error=True)
+                ctx.Wrapper.increment([5, 6, 6])  # should still execute
+                if not continue_on_error:
+                    with pytest.raises(tuber.TuberRemoteError):
+                        ctx()
+                else:
+                    r1, r2, r3 = ctx(continue_on_error=True)
         else:
             async with s.tuber_context() as ctx:
-                ctx.single_warning("This is a warning", error=True)
-                await ctx(warn_remote_errors=True)
+                ctx.Wrapper.increment([1, 2, 3])  # fine
+                ctx.Warnings.single_warning("This is a warning", error=True)
+                r3 = ctx.Wrapper.increment([5, 6, 6])  # should still execute
+                if not continue_on_error:
+                    with pytest.raises(tuber.TuberRemoteError):
+                        await ctx()
+                    with pytest.raises(tuber.TuberRemoteError):
+                        await r3
+                else:
+                    r1, r2, r3 = await ctx(continue_on_error=True)
+
+    if not continue_on_error:
+        return
+
+    assert r1 == [2, 3, 4]
+    assert r2.error  # this is an error response returned as a result
+    assert r3 == [6, 7, 7]

@@ -314,6 +314,12 @@ class DLL_LOCAL tuber_resource : public http_resource {
 					return std::make_shared<string_response>(encodeResponse(error_response(message)), http::http_utils::http_ok, responseFormat);
 				}
 
+				auto xopts = parseCommaSepList(req.get_header("X-Tuber-Options"));
+				bool no_early_bail = false;
+				if (xopts.size() > 0) {
+					no_early_bail = std::find(xopts.begin(), xopts.end(), "continue-on-error") != xopts.end();
+				}
+
 				/* Parse request */
 				std::string content(req.get_content());
 				py::object request_obj = requestCodecIt->second.loads(content);
@@ -352,10 +358,11 @@ class DLL_LOCAL tuber_resource : public http_resource {
 						} catch(std::exception &e) {
 							/* Indicates an internal error - this does not normally happen */
 							result[i] = error_response(e.what());
-							early_bail = true;
+							if (!no_early_bail)
+								early_bail = true;
 						}
 
-						if(result[i].contains("error")) {
+						if(result[i].contains("error") && !no_early_bail) {
 							/* Indicates client code flagged an error - this is a nominal code path */
 							early_bail = true;
 						}
