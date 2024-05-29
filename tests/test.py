@@ -698,8 +698,8 @@ async def test_tuberpy_continue_errors(tuber_call, accept_types, simple, continu
                     r1, r2, r3 = ctx(continue_on_error=True)
         else:
             async with s.tuber_context() as ctx:
-                ctx.Wrapper.increment([1, 2, 3])  # fine
-                ctx.Warnings.single_warning("This is a warning", error=True)
+                r1 = ctx.Wrapper.increment([1, 2, 3])  # fine
+                r2 = ctx.Warnings.single_warning("This is a warning", error=True)
                 r3 = ctx.Wrapper.increment([5, 6, 6])  # should still execute
                 if not continue_on_error:
                     with pytest.raises(tuber.TuberRemoteError):
@@ -707,11 +707,19 @@ async def test_tuberpy_continue_errors(tuber_call, accept_types, simple, continu
                     with pytest.raises(tuber.TuberRemoteError):
                         await r3
                 else:
-                    r1, r2, r3 = await ctx(continue_on_error=True)
+                    try:
+                        await ctx(continue_on_error=True)
+                    except tuber.TuberRemoteError:
+                        pass
+                    with pytest.raises(tuber.TuberRemoteError):
+                        await r2
+                    r1 = await r1
+                    r3 = await r3
 
     if not continue_on_error:
         return
 
     assert r1 == [2, 3, 4]
-    assert r2.error  # this is an error response returned as a result
+    if simple:
+        assert isinstance(r2, tuber.TuberRemoteError)  # this is an error response returned as a result
     assert r3 == [6, 7, 7]
