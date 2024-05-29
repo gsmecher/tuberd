@@ -1,3 +1,18 @@
+Version 0.13
+============
+
+- A "simple" (non-asyncio) client now lives alongside the asyncio client. The
+  points of entry for these are "resolve" and "resolve_simple". They are
+  approximately API-compatible, but the non-asyncio version entirely avoids
+  async code style (async def / await / ...).
+
+- Multiple calls (using a Context or SimpleContext) can now optionally continue
+  after errors, using the continue_on_error flag. When this is True, all calls
+  in a Context/SimpleContext run to completion even if some of them fail.
+  The default behaviour remains the same - when continue_on_error is False,
+  server-side execution proceeds in sequence and halts at the first call that
+  encounters an error.
+
 Version 0.12
 ============
 
