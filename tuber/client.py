@@ -162,7 +162,7 @@ class SimpleContext:
         setattr(self, name, caller)
         return caller
 
-    def send(self):
+    def send(self, continue_on_error: bool = False):
         """Break off a set of calls and return them for execution."""
 
         # An empty Context returns an empty list of calls
@@ -176,10 +176,12 @@ class SimpleContext:
 
         # Declare the media types we want to allow getting back
         headers = {"Accept": ", ".join(self.accept_types)}
+        if continue_on_error:
+            headers["X-Tuber-Options"] = "continue-on-error"
         # Create a HTTP request to complete the call.
         return requests.post(self.uri, json=calls, headers=headers)
 
-    def receive(self, response):
+    def receive(self, response: "requests.Response", continue_on_error: bool = False):
         """Parse response from a previously sent HTTP request."""
 
         # An empty Context returns an empty list of calls
@@ -218,9 +220,12 @@ class SimpleContext:
 
             # Resolve either a result or an error
             if hasattr(r, "error") and r.error:
-                raise TuberRemoteError(getattr(r.error, "message", "Unknown error"))
-
-            if hasattr(r, "result"):
+                exc = TuberRemoteError(getattr(r.error, "message", "Unknown error"))
+                if continue_on_error:
+                    results.append(exc)
+                else:
+                    raise exc
+            elif hasattr(r, "result"):
                 results.append(r.result)
             else:
                 raise TuberError("Result has no 'result' attribute")
@@ -228,10 +233,11 @@ class SimpleContext:
         # Return a list of results
         return results
 
-    def __call__(self):
+    def __call__(self, continue_on_error: bool = False):
         """Break off a set of calls and return them for execution."""
 
-        return self.receive(self.send())
+        resp = self.send(continue_on_error=continue_on_error)
+        return self.receive(resp, continue_on_error=continue_on_error)
 
 
 class Context(SimpleContext):
@@ -265,7 +271,7 @@ class Context(SimpleContext):
         self.calls.append((request, future))
         return future
 
-    async def __call__(self):
+    async def __call__(self, continue_on_error: bool = False):
         """Break off a set of calls and return them for execution."""
 
         # An empty Context returns an empty list of calls
@@ -307,6 +313,8 @@ class Context(SimpleContext):
 
         # Declare the media types we want to allow getting back
         headers = {"Accept": ", ".join(self.accept_types)}
+        if continue_on_error:
+            headers["X-Tuber-Options"] = "continue-on-error"
         # Create a HTTP request to complete the call. This is a coroutine,
         # so we queue the call and then suspend execution (via 'yield')
         # until it's complete.
@@ -334,7 +342,6 @@ class Context(SimpleContext):
             raise TuberRemoteError(json_out.error.message)
 
         # Resolve futures
-        results = []
         for f, r in zip(futures, json_out):
             # Always emit warnings, if any occurred
             if hasattr(r, "warnings") and r.warnings:
@@ -349,7 +356,6 @@ class Context(SimpleContext):
                     f.set_exception(TuberRemoteError("Unknown error"))
             else:
                 if hasattr(r, "result"):
-                    results.append(r.result)
                     f.set_result(r.result)
                 else:
                     f.set_exception(TuberError("Result has no 'result' attribute"))
