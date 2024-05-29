@@ -220,10 +220,11 @@ class SimpleContext:
 
             # Resolve either a result or an error
             if hasattr(r, "error") and r.error:
+                exc = TuberRemoteError(getattr(r.error, "message", "Unknown error"))
                 if continue_on_error:
-                    results.append(r)
+                    results.append(exc)
                 else:
-                    raise TuberRemoteError(getattr(r.error, "message", "Unknown error"))
+                    raise exc
             elif hasattr(r, "result"):
                 results.append(r.result)
             else:
@@ -349,10 +350,10 @@ class Context(SimpleContext):
 
             # Resolve either a result or an error
             if hasattr(r, "error") and r.error:
-                if continue_on_error:
-                    f.set_result(r)
+                if hasattr(r.error, "message"):
+                    f.set_exception(TuberRemoteError(r.error.message))
                 else:
-                    f.set_exception(TuberRemoteError(getattr(r.error, "message", "Unknown error")))
+                    f.set_exception(TuberRemoteError("Unknown error"))
             else:
                 if hasattr(r, "result"):
                     f.set_result(r.result)
