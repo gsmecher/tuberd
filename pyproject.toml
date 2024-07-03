@@ -9,12 +9,12 @@ requires = [
 build-backend = "setuptools.build_meta"
 
 [project]
-name='tuber'
+name='tuberd'
 description='Serve Python (or C++) objects across a LAN using something like JSON-RPC'
 authors=[
 	{name="Graeme Smecher", email="gsmecher@threespeedlogic.com"},
 ]
-urls={source="https://github.com/gsmecher/tuber"}
+urls={source="https://github.com/gsmecher/tuberd"}
 classifiers=[
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: BSD License",
