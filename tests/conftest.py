@@ -3,6 +3,11 @@ import pytest
 pytest_plugins = ("pytest_asyncio",)
 
 
+# Add custom orjson marker
+def pytest_configure(config):
+    config.addinivalue_line("markers", "orjson: marks tests that require server-side serialization of numpy arrays")
+
+
 # Allow test invocation to specify arguments to tuberd backend (this way, we
 # can re-use the same test machinery across different json libraries.)
 def pytest_addoption(parser):

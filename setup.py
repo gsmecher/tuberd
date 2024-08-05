@@ -7,6 +7,8 @@ import os
 import re
 import subprocess
 import sys
+import sysconfig
+import pybind11
 from pathlib import Path
 
 from setuptools import Extension, setup
@@ -45,6 +47,15 @@ class CMakeBuild(build_ext):
         if "CMAKE_ARGS" in os.environ:
             cmake_args += [item for item in os.environ["CMAKE_ARGS"].split(" ") if item]
 
+        # sensible defaults
+        if not any(["Python_ROOT_DIR" in a for a in cmake_args]):
+            pyroot = sysconfig.get_config_var("prefix")
+            cmake_args += [f"-DPython_ROOT_DIR={pyroot}"]
+
+        if not any(["pybind11_DIR" in a for a in cmake_args]):
+            pbdir = pybind11.get_cmake_dir()
+            cmake_args += [f"-Dpybind11_DIR={pbdir}"]
+
         build_temp = Path(self.build_temp) / ext.name
         if not build_temp.exists():
             build_temp.mkdir(parents=True)
@@ -52,6 +63,12 @@ class CMakeBuild(build_ext):
         subprocess.run(["cmake", ext.sourcedir, *cmake_args], cwd=build_temp, check=True)
         subprocess.run(["cmake", "--build", ".", *build_args], cwd=build_temp, check=True)
         self.tuberd_path = build_temp / "tuberd"
+
+        # add test module
+        build_lib = Path(self.build_lib) / "tuber" / "tests"
+        if not build_lib.exists():
+            build_lib.mkdir(parents=True)
+        self.copy_file(build_temp / self.get_ext_filename("test_module"), build_lib)
 
 
 class CMakeInstall(install_scripts):
@@ -95,6 +112,10 @@ setup(
         "install_scripts": CMakeInstall,
         "install": CMakeInstallHeaders,
     },
-    packages=find_packages(),
+    packages=["tuber", "tuber.tests"],
+    package_dir={
+        "tuber": "./tuber",
+        "tuber.tests": "./tests",
+    },
     package_data={"tuber": ["include/*.hpp"]},
 )
