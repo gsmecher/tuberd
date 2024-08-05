@@ -21,12 +21,15 @@ classifiers=[
     "Operating System :: OS Independent",
 ]
 license = {file="LICENSE"}
-dynamic = ["version"]
+dynamic = ["version", "dependencies"]
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
 
 [tool.setuptools_scm]
-#version_file = "py/tuber/_version.py"  # version 8.0.0 and newer
-write_to = "tuber/_version.py"  # version 7.1.0 and older
-version_scheme = "no-guess-dev"
+write_to = "tuber/_version.py"
+version_scheme = "only-version"
+local_scheme = "no-local-version"
 
 [tool.black]
 line-length = 120

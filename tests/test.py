@@ -9,8 +9,11 @@ import pathlib
 import pytest
 import requests
 import subprocess
-import test_module as tm
-import textwrap
+
+try:
+    import test_module as tm
+except ImportError:
+    from tuber.tests import test_module as tm
 import tuber
 from tuber import codecs
 import weakref
@@ -120,11 +123,8 @@ registry = {
 def tuberd(pytestconfig):
     """Spawn (and kill) a tuberd"""
 
-    bin_dir = pathlib.Path(os.environ.get("CMAKE_BINARY_DIR", "."))
-    src_dir = pathlib.Path(os.environ.get("CMAKE_SOURCE_DIR", "."))
-
-    tuberd = bin_dir / "tuberd"
-    registry = src_dir / "tests/test.py"
+    tuberd = "tuberd"
+    registry = __file__
 
     argv = [
         f"{tuberd}",
@@ -420,13 +420,7 @@ async def test_tuberpy_module_docstrings(tuber_call, accept_types, simple):
     """Ensure docstrings in C++ methods end up in the TuberObject's __doc__ dunder."""
 
     s = await resolve("Wrapper", accept_types, simple)
-    assert (
-        s.__doc__
-        == textwrap.dedent(
-            """
-        This is the object DocString, defined in C++."""
-        ).lstrip()
-    )
+    assert s.__doc__.strip() == tm.Wrapper.__doc__.strip()
 
 
 @pytest.mark.parametrize("simple", [True, False])
@@ -436,15 +430,7 @@ async def test_tuberpy_method_docstrings(tuber_call, accept_types, simple):
     """Ensure docstrings in C++ methods end up in the TuberObject's __doc__ dunder."""
 
     s = await resolve("Wrapper", accept_types, simple)
-    assert (
-        s.increment.__doc__
-        == textwrap.dedent(
-            """
-        increment(self: test_module.Wrapper, x: List[int]) -> List[int]
-
-        A function that increments each element in its argument list."""
-        ).lstrip()
-    )
+    assert s.increment.__doc__.strip() == tm.Wrapper.increment.__doc__.strip()
 
 
 @pytest.mark.parametrize("simple", [False])

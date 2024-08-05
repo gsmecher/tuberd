@@ -1,0 +1,140 @@
+name: Build Wheels
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+  release:
+    types: [ published ]
+
+jobs:
+  build_wheels_linux:
+    name: Build wheels for cp3${{ matrix.python_version_minor }}
+    runs-on: ubuntu-20.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python_version_minor: [8, 9, 10, 11, 12]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Setup python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.${{ matrix.python_version_minor }}
+          architecture: x64
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade patchelf auditwheel
+          ./wheels/install_deps.sh
+
+      - name: Build wheel
+        run: >
+          CMAKE_ARGS="-DCMAKE_MODULE_PATH=$PWD/deps/share/cmake/Modules -DCMAKE_PREFIX_PATH=$PWD/deps"
+          pip wheel . -w wheelhouse -vvv
+
+      - name: Repair wheel
+        run: >
+          auditwheel -v repair ./wheelhouse/tuberd*.whl
+          --exclude libpython3.${{ matrix.python_version_minor }}.so
+          --plat manylinux_2_31_x86_64
+
+      - name: Install wheel for tests
+        run: pip install ./wheelhouse/tuberd*manylinux*.whl
+
+      - name: Run tests
+        run: |
+          cd tests
+          ./test.py --import-mode append
+          ./test.py --import-mode append --orjson-with-numpy
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cibw-wheels-${{ runner.os }}-${{ strategy.job-index }}
+          path: ./wheelhouse/tuberd*manylinux*.whl
+
+  build_wheels_osx:
+    name: Build wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macos-13 is an intel runner, macos-14 is apple silicon
+          - os: macos-13
+            target: 10.15
+          - os: macos-14
+            target: 11.0
+
+    steps:
+      - name: Set macOS deployment target
+        run: echo "MACOSX_DEPLOYMENT_TARGET=${{ matrix.target }}" >> $GITHUB_ENV
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Build wheels
+        uses: pypa/cibuildwheel@v2.20.0
+        env:
+          CIBW_BEFORE_ALL: brew install automake libtool && ./wheels/install_deps.sh
+          CIBW_REPAIR_WHEEL_COMMAND: "delocate-wheel --require-archs {delocate_archs} -w {dest_dir} -v {wheel} -e Python.framework"
+          CIBW_ENVIRONMENT: CMAKE_ARGS="-DCMAKE_MODULE_PATH=$PWD/deps/share/cmake/Modules -DCMAKE_PREFIX_PATH=$PWD/deps"
+          CIBW_BUILD_VERBOSITY: 3
+          CIBW_SKIP: cp36-* cp37-* cp313-* cp38-macosx_arm64 pp*
+          CIBW_TEST_COMMAND: >
+            {project}/tests/test.py --import-mode append &&
+            {project}/tests/test.py --import-mode append --orjson-with-numpy
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
+          path: ./wheelhouse/tuberd*.whl
+
+  build_sdist:
+    name: Build source distribution
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Build sdist
+        run: pipx run build --sdist
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cibw-sdist
+          path: dist/*.tar.gz
+
+  upload_pypi:
+    needs: [build_wheels_linux, build_wheels_osx, build_sdist]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+    if: github.event_name == 'release' && github.event.action == 'published'
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          # unpacks all CIBW artifacts into dist/
+          pattern: cibw-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
