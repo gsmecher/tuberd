@@ -1,3 +1,9 @@
+.. image:: https://badge.fury.io/py/tuberd.svg
+   :target: https://badge.fury.io/py/tuberd
+
+.. image:: https://github.com/gsmecher/tuberd/actions/workflows/package.yml/badge.svg
+   :target: https://github.com/gsmecher/tuberd/actions/workflows/package.yml
+
 Tuber Server and Client
 =======================
 
@@ -122,3 +128,21 @@ licensing is a stumbling block for you, please contact me at
 .. _asyncio: https://docs.python.org/3/library/asyncio.html
 .. _aiohttp: https://docs.aiohttp.org/en/stable/
 .. _autoawait: https://ipython.readthedocs.io/en/stable/interactive/autoawait.html
+
+Installation
+------------
+
+Pre-built wheels for Linux and macOS operating systems are available on PyPI for CPython 3.8+:
+
+.. code:: bash
+
+   pip install tuberd
+
+Building from source requires the `libfmt` and `libmicrohttpd` dependencies, along with `libhttpserver`.
+To simplify this process, the `wheels/install_deps.sh` script can be used to build these
+dependencies locally and compile against them.
+
+.. code:: bash
+
+   ./wheels/install_deps.sh
+   pip install .
