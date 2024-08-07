@@ -132,15 +132,26 @@ licensing is a stumbling block for you, please contact me at
 Installation
 ------------
 
-Pre-built wheels for Linux and macOS operating systems are available on PyPI for CPython 3.8+:
+Pre-built wheels for Linux and macOS operating systems are available on PyPI for
+CPython 3.8+:
 
 .. code:: bash
 
    pip install tuberd
 
-Building from source requires the `libfmt` and `libmicrohttpd` dependencies, along with `libhttpserver`.
-To simplify this process, the `wheels/install_deps.sh` script can be used to build these
-dependencies locally and compile against them.
+Building from source requires the ``libfmt`` and ``libmicrohttpd`` dependencies,
+along with ``libhttpserver``.  To ensure that ``cmake`` can find the
+``libhttpserver`` library, you may need to add the path where the
+``FindLibHttpServer.cmake`` file is installed to the ``CMAKE_MODULE_PATH``
+option, for example:
+
+.. code:: bash
+
+   CMAKE_ARGS="-DCMAKE_MODULE_PATH=/usr/local/share/cmake/Modules" pip install .
+
+To simplify the build process, the ``wheels/install_deps.sh`` script can be used to
+build all the dependencies locally and compile against them.  In this instance,
+``cmake`` should be able to discover the appropriate paths for all dependencies:
 
 .. code:: bash
 
