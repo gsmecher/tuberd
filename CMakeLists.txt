@@ -8,6 +8,13 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17")
 
+# link against deps dir
+if(EXISTS ${CMAKE_SOURCE_DIR}/deps)
+	message(STATUS "Found deps: ${CMAKE_SOURCE_DIR}/deps")
+	list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/deps/share/cmake/Modules")
+	list(APPEND CMAKE_PREFIX_PATH "${CMAKE_SOURCE_DIR}/deps")
+endif()
+
 find_package(Python COMPONENTS Interpreter Development REQUIRED)
 find_package(fmt REQUIRED)
 find_package(LibHttpServer REQUIRED)
