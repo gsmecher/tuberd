@@ -57,7 +57,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: cibw-wheels-${{ runner.os }}-${{ strategy.job-index }}
+          name: cibw-wheels-${{ runner.os }}-cp3${{ matrix.python_version_minor }}
           path: ./wheelhouse/tuberd*manylinux*.whl
 
   build_wheels_osx:
@@ -97,7 +97,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: cibw-wheels-${{ matrix.os }}-${{ strategy.job-index }}
+          name: cibw-wheels-${{ matrix.os }}
           path: ./wheelhouse/tuberd*.whl
 
   build_sdist:
