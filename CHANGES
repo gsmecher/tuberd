@@ -1,3 +1,8 @@
+Version 0.14
+============
+
+- CI/CD improvements: builds wheels for manylinux and OS X
+
 Version 0.13
 ============
 
