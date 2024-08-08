@@ -10,6 +10,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name='tuberd'
+readme='README.rst'
 description='Serve Python (or C++) objects across a LAN using something like JSON-RPC'
 authors=[
 	{name="Graeme Smecher", email="gsmecher@threespeedlogic.com"},

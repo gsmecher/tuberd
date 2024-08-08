@@ -37,7 +37,7 @@ ceremony and no boilerplate.
 
 Its main features and design principles are:
 
-- Pythonic call styles, including *args, **kwargs, and DocStrings.
+- Pythonic call styles, including \*args, \*\*kwargs, and DocStrings.
 
 - JSON and CBOR support for efficient and friendly serialization of return
   values.
