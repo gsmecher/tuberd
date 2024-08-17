@@ -7,6 +7,7 @@ import asyncio
 import textwrap
 import types
 import warnings
+import inspect
 
 from . import TuberError, TuberStateError, TuberRemoteError
 from .codecs import AcceptTypes, Codecs
@@ -58,6 +59,30 @@ def attribute_blacklisted(name):
         return True
 
     return False
+
+
+def tuber_wrapper(func, props):
+    """
+    Annotate the wrapper function with docstrings and signature.
+    """
+
+    # Attach docstring, if provided and valid
+    try:
+        func.__doc__ = textwrap.dedent(props.__doc__)
+    except:
+        pass
+
+    # Attach a function signature, if provided and valid
+    try:
+        # build a dummy function to parse its signature with inspect
+        code = compile(f"def sigfunc{props.__signature__}:\n pass", "sigfunc", "single")
+        exec(code, globals())
+        sig = inspect.signature(sigfunc)
+        func.__signature__ = sig
+    except:
+        pass
+
+    return func
 
 
 class SubContext:
@@ -449,22 +474,16 @@ class SimpleTuberObject:
 
         for methname in getattr(meta, "methods", []):
             # Generate a callable prototype
-            def invoke_wrapper(name):
+            def invoke_wrapper(name, props):
                 def invoke(self, *args, **kwargs):
                     with self.tuber_context() as ctx:
                         getattr(ctx, name)(*args, **kwargs)
                         results = ctx()
                     return results[0]
 
-                return invoke
+                return tuber_wrapper(invoke, props)
 
-            invoke = invoke_wrapper(methname)
-
-            # Attach DocStrings, if provided and valid
-            try:
-                invoke.__doc__ = textwrap.dedent(methods[methname].__doc__)
-            except:
-                pass
+            invoke = invoke_wrapper(methname, methods[methname])
 
             # Associate as a class method.
             setattr(self, methname, types.MethodType(invoke, self))
@@ -530,21 +549,15 @@ class TuberObject(SimpleTuberObject):
 
         for methname in getattr(meta, "methods", []):
             # Generate a callable prototype
-            def invoke_wrapper(name):
+            def invoke_wrapper(name, props):
                 async def invoke(self, *args, **kwargs):
                     async with self.tuber_context() as ctx:
                         result = getattr(ctx, name)(*args, **kwargs)
                     return await result
 
-                return invoke
+                return tuber_wrapper(invoke, props)
 
-            invoke = invoke_wrapper(methname)
-
-            # Attach DocStrings, if provided and valid
-            try:
-                invoke.__doc__ = textwrap.dedent(methods[methname].__doc__)
-            except:
-                pass
+            invoke = invoke_wrapper(methname, methods[methname])
 
             # Associate as a class method.
             setattr(self, methname, types.MethodType(invoke, self))

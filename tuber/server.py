@@ -82,6 +82,21 @@ def describe(registry, request):
             return result_response(attr)
 
         # Complex case: return a description of a method
-        return result_response(__doc__=inspect.getdoc(attr))
+        doc = inspect.getdoc(attr)
+        sig = None
+        try:
+            sig = str(inspect.signature(attr))
+        except:
+            # pybind docstrings include a signature as the first line
+            if doc and doc.startswith(attr.__name__ + "("):
+                if "\n" in doc:
+                    sig, doc = doc.split("\n", 1)
+                    doc = doc.strip()
+                else:
+                    sig = doc
+                    doc = None
+                sig = "(" + sig.split("(", 1)[1]
+
+        return result_response(__doc__=doc, __signature__=sig)
 
     return error_response(f"Invalid request (object={objname}, method={methodname}, property={propertyname})")
