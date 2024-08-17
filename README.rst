@@ -140,20 +140,21 @@ CPython 3.8+:
    pip install tuberd
 
 Building from source requires the ``libfmt`` and ``libmicrohttpd`` dependencies,
-along with ``libhttpserver``.  To ensure that ``cmake`` can find the
-``libhttpserver`` library, you may need to add the path where the
+along with ``libhttpserver``.  To simplify the build process, the
+``wheels/install_deps.sh`` script can be used to build all the dependencies
+locally and compile against them.  In this instance, ``cmake`` should be able to
+discover the appropriate paths for all dependencies.  Use the ``BUILD_DEPS``
+``cmake`` argument to trigger this build with pip:
+
+.. code:: bash
+
+   CMAKE_ARGS="-DBUILD_DEPS=yes" pip install tuberd
+
+If you prefer to build the dependencies manually, to ensure that ``cmake`` can
+find the ``libhttpserver`` library, you may need to add the path where the
 ``FindLibHttpServer.cmake`` file is installed to the ``CMAKE_MODULE_PATH``
 option, for example:
 
 .. code:: bash
 
-   CMAKE_ARGS="-DCMAKE_MODULE_PATH=/usr/local/share/cmake/Modules" pip install .
-
-To simplify the build process, the ``wheels/install_deps.sh`` script can be used to
-build all the dependencies locally and compile against them.  In this instance,
-``cmake`` should be able to discover the appropriate paths for all dependencies:
-
-.. code:: bash
-
-   ./wheels/install_deps.sh
-   pip install .
+   CMAKE_ARGS="-DCMAKE_MODULE_PATH=/usr/local/share/cmake/Modules" pip install tuberd

@@ -1,5 +1,23 @@
 #!/bin/sh
 
+# Figure out how to download things
+if wget -q -O /dev/null http://www.google.com; then
+    FETCH () {
+        test -f `basename $1` || wget --no-check-certificate $1
+    }
+elif curl -Ls -o /dev/null http://www.google.com; then
+    FETCH () {
+        test -f `basename $1` || curl -kLO $1
+    }
+elif fetch -o /dev/null http://www.google.com; then
+    FETCH () {
+        test -f `basename $1` || fetch $1
+    }
+else
+    echo "Cannot figure out how to download things!"
+    exit 1
+fi
+
 set -e
 
 scriptdir=$(cd `dirname $0`; pwd -P)
@@ -10,7 +28,7 @@ cd $scriptdir/..
 prefix=$PWD/deps
 cd $prefix
 
-[ -e fmt-10.2.1.zip ] || wget https://github.com/fmtlib/fmt/releases/download/10.2.1/fmt-10.2.1.zip
+[ -e fmt-10.2.1.zip ] || FETCH https://github.com/fmtlib/fmt/releases/download/10.2.1/fmt-10.2.1.zip
 [ -e fmt-10.2.1 ] || unzip fmt-10.2.1.zip
 [ -e fmt-10.2.1/build ] || mkdir fmt-10.2.1/build
 cd fmt-10.2.1/build
@@ -19,7 +37,7 @@ make
 make install
 cd $prefix
 
-[ -e libmicrohttpd-1.0.1.tar.gz ] || wget https://github.com/Karlson2k/libmicrohttpd/releases/download/v1.0.1/libmicrohttpd-1.0.1.tar.gz
+[ -e libmicrohttpd-1.0.1.tar.gz ] || FETCH https://github.com/Karlson2k/libmicrohttpd/releases/download/v1.0.1/libmicrohttpd-1.0.1.tar.gz
 [ -e libmicrohttpd-1.0.1 ] || tar xzf libmicrohttpd-1.0.1.tar.gz
 cd libmicrohttpd-1.0.1
 ./configure --without-gnutls --enable-https=no --enable-shared=no --disable-doc --disable-examples --disable-tools --prefix=$prefix

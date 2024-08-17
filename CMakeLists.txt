@@ -8,6 +8,18 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17")
 
+# build dependencies if requested
+option(BUILD_DEPS "Build library dependencies")
+
+if(BUILD_DEPS)
+	message(STATUS "Building dependencies: ${CMAKE_SOURCE_DIR}/deps")
+	execute_process(COMMAND ${CMAKE_SOURCE_DIR}/wheels/install_deps.sh
+		RESULT_VARIABLE STATUS)
+	if(STATUS AND NOT STATUS EQUAL 0)
+		message(FATAL_ERROR "Failed to install dependencies: ${STATUS}")
+	endif()
+endif()
+
 # link against deps dir
 if(EXISTS ${CMAKE_SOURCE_DIR}/deps)
 	message(STATUS "Found deps: ${CMAKE_SOURCE_DIR}/deps")
