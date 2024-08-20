@@ -16,7 +16,7 @@
 #include <pybind11/pybind11.h>
 #include <fmt/format.h>
 
-namespace pybind11 {
+namespace PYBIND11_NAMESPACE {
 	namespace detail {
 
 		template<typename U>
