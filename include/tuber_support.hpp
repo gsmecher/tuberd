@@ -128,6 +128,7 @@ namespace PYBIND11_NAMESPACE {
 		str_enum(handle scope, const char* name) : scope(scope), name(name) {
 			kwargs["value"] = cast(name);
 			kwargs["names"] = py_entries;
+			kwargs["type"] = module::import("builtins").attr("str");
 			if(scope) {
 				if(hasattr(scope, "__module__"))
 					kwargs["module"] = scope.attr("__module__");
