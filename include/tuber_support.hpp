@@ -14,7 +14,6 @@
 
 #include <pybind11/detail/common.h>
 #include <pybind11/pybind11.h>
-#include <fmt/format.h>
 
 namespace PYBIND11_NAMESPACE {
 	namespace detail {
