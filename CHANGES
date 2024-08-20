@@ -1,3 +1,10 @@
+Version 0.15
+============
+
+- Fix enum class serialization. The str_enum helper now produces enum.Enum()
+  classes in Python that are also str() subclasses. For all 3 serializers we
+  use (json, orjson, cbor2) this is enough to correctly serialize enum classes.
+
 Version 0.14
 ============
 
