@@ -555,7 +555,7 @@ async def test_tuberpy_serialize_enum_class(tuber_call, accept_types, simple):
     s = await resolve("Wrapper", accept_types, simple)
     r = s.return_x()
     if not simple:
-       await r
+        await r
 
 
 @pytest.mark.xfail
