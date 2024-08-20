@@ -553,9 +553,21 @@ async def test_tuberpy_unserializable(tuber_call, accept_types, simple):
 async def test_tuberpy_serialize_enum_class(tuber_call, accept_types, simple):
     """Return an enum class, which must be converted in pybind11 to something serializable."""
     s = await resolve("Wrapper", accept_types, simple)
+
+    # Retrieve a Kind::X value
     r = s.return_x()
     if not simple:
-        await r
+        r = await r
+
+    # Make sure it's serialized to a string as expected
+    assert r == "X"
+
+    # Ensure we can round-trip it back into C++
+    r = s.is_x(r)
+    if not simple:
+        r = await r
+
+    assert r is True
 
 
 @pytest.mark.xfail
