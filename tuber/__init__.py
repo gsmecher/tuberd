@@ -41,4 +41,13 @@ except ImportError as ie:
         raise ie
 
 
+def get_include():
+    """
+    Return the path to the tuber include directory.
+    """
+    from pathlib import Path
+
+    return str(Path(__file__).parent / "include")
+
+
 # vim: sts=4 ts=4 sw=4 tw=78 smarttab expandtab
