@@ -22,7 +22,7 @@ classifiers=[
     "Operating System :: OS Independent",
 ]
 license = {file="LICENSE"}
-dynamic = ["version", "dependencies"]
+dynamic = ["version", "dependencies", "scripts"]
 
 [tool.setuptools.dynamic]
 dependencies = {file = ["requirements.txt"]}
@@ -34,3 +34,10 @@ local_scheme = "no-local-version"
 
 [tool.black]
 line-length = 120
+
+[tool.cibuildwheel]
+before-all = "./wheels/install_deps.sh"
+test-command = [
+    "pytest -sv {project}/tests/test.py --import-mode append",
+    "pytest -sv {project}/tests/test.py --import-mode append --orjson-with-numpy",
+]

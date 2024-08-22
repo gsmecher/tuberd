@@ -13,13 +13,7 @@ from pathlib import Path
 
 from setuptools import Extension, setup
 from setuptools.command.build_ext import build_ext
-from setuptools.command.install_scripts import install_scripts
 from setuptools.command.install import install
-
-# Convert distutils platform specifiers to CMake -A arguments
-PLAT_TO_CMAKE = {
-    "linux-x86_64": "x64",
-}
 
 
 # A CMakeExtension needs a sourcedir instead of a file list.
@@ -62,27 +56,18 @@ class CMakeBuild(build_ext):
 
         subprocess.run(["cmake", ext.sourcedir, *cmake_args], cwd=build_temp, check=True)
         subprocess.run(["cmake", "--build", ".", *build_args], cwd=build_temp, check=True)
-        self.tuberd_path = build_temp / "tuberd"
+
+        # add server module
+        tuber_lib = Path(self.build_lib) / "tuber"
+        if not tuber_lib.exists():
+            tuber_lib.mkdir(parents=True)
+        self.copy_file(build_temp / self.get_ext_filename("_tuber_runtime"), tuber_lib)
 
         # add test module
-        build_lib = Path(self.build_lib) / "tuber" / "tests"
-        if not build_lib.exists():
-            build_lib.mkdir(parents=True)
-        self.copy_file(build_temp / self.get_ext_filename("test_module"), build_lib)
-
-
-class CMakeInstall(install_scripts):
-    def run(self):
-        super().run()
-
-        self.announce("Installing tuberd", level=3)
-        install_dir = Path(self.install_dir)
-        if not install_dir.exists():
-            install_dir.mkdir(parents=True)
-
-        tuberd_src = self.get_finalized_command("build_ext").tuberd_path
-        tuberd_dst = install_dir / "tuberd"
-        self.copy_file(tuberd_src, tuberd_dst)
+        test_lib = tuber_lib / "tests"
+        if not test_lib.exists():
+            test_lib.mkdir(parents=True)
+        self.copy_file(build_temp / self.get_ext_filename("test_module"), test_lib)
 
 
 class CMakeInstallHeaders(install):
@@ -109,7 +94,6 @@ setup(
     ext_modules=[CMakeExtension("tuberd")],
     cmdclass={
         "build_ext": CMakeBuild,
-        "install_scripts": CMakeInstall,
         "install": CMakeInstallHeaders,
     },
     packages=["tuber", "tuber.tests"],
@@ -118,4 +102,5 @@ setup(
         "tuber.tests": "./tests",
     },
     package_data={"tuber": ["include/*.hpp"]},
+    entry_points={"console_scripts": ["tuberd = tuber.server:main"]},
 )

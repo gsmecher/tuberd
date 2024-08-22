@@ -5,6 +5,7 @@ import asyncio
 import importlib
 import numpy as np
 import os
+import sys
 import pathlib
 import pytest
 import requests
@@ -124,11 +125,14 @@ registry = {
 def tuberd(pytestconfig):
     """Spawn (and kill) a tuberd"""
 
-    tuberd = "tuberd"
+    if os.getenv("CMAKE_TEST"):
+        tuberd = [sys.executable, "-m", "tuber.server"]
+    else:
+        tuberd = ["tuberd"]
+
     registry = __file__
 
-    argv = [
-        f"{tuberd}",
+    argv = tuberd + [
         f"-p{TUBERD_PORT}",
         f"--registry={registry}",
     ]
