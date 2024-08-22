@@ -8,14 +8,12 @@
 #include <string>
 #include <vector>
 
-#include <getopt.h>
-
 #include <httpserver.hpp>
 #include <httpserver/http_utils.hpp>
 
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
-#include <pybind11/embed.h>
+#include <pybind11/eval.h>
 
 #include <fmt/format.h>
 
@@ -164,6 +162,7 @@ static std::vector<std::string> parseCommaSepList(std::string_view rawl){
 
 static py::dict tuber_server_invoke(py::dict &registry,
 		py::dict const& call,
+		py::object const& describe,
 		Codec::loads_t const& loads,
 		Codec::dumps_t const& dumps) {
 
@@ -236,7 +235,7 @@ static py::dict tuber_server_invoke(py::dict &registry,
 		fmt::print(stderr, "Delegating json {} to describe() slowpath.\n", call);
 
 	/* Slow path: object metadata, properties */
-	return py::eval("tuber.server.describe")(registry, call);
+	return describe(registry, call);
 }
 
 /* Responder for tuber resources exported via JSON.
@@ -247,10 +246,8 @@ static py::dict tuber_server_invoke(py::dict &registry,
 class DLL_LOCAL tuber_resource : public http_resource {
 	public:
 		using CodecMap = std::map<std::string, Codec>;
-		tuber_resource(py::dict const& reg,
-				const CodecMap& codecs) :
-			reg(reg),
-			codecs(codecs) {};
+		tuber_resource(py::dict const& reg, const CodecMap& codecs, py::object const& describe) :
+			reg(reg), codecs(codecs), describe(describe) {};
 
 		std::string determineResponseFormat(std::string_view accept, std::string_view requestFormat) {
 			if (accept.empty()) //If nothing specified, use what the client used
@@ -328,7 +325,7 @@ class DLL_LOCAL tuber_resource : public http_resource {
 					/* Simple JSON object - invoke it and return the results. */
 					py::object result;
 					try {
-						result = tuber_server_invoke(reg, request_obj, responseCodecIt->second.loads, responseCodecIt->second.dumps);
+						result = tuber_server_invoke(reg, request_obj, describe, responseCodecIt->second.loads, responseCodecIt->second.dumps);
 					} catch(std::exception &e) {
 						result = error_response(e.what());
 						if(verbose & Verbose::NOISY)
@@ -354,7 +351,7 @@ class DLL_LOCAL tuber_resource : public http_resource {
 						}
 
 						try {
-							result[i] = tuber_server_invoke(reg, request_list[i], responseCodecIt->second.loads, responseCodecIt->second.dumps);
+							result[i] = tuber_server_invoke(reg, request_list[i], describe, responseCodecIt->second.loads, responseCodecIt->second.dumps);
 						} catch(std::exception &e) {
 							/* Indicates an internal error - this does not normally happen */
 							result[i] = error_response(e.what());
@@ -389,6 +386,7 @@ class DLL_LOCAL tuber_resource : public http_resource {
 	private:
 		py::dict reg;
 		const CodecMap& codecs;
+		py::object describe;
 };
 
 /* Responder for files served out of the local filesystem.
@@ -451,85 +449,21 @@ static void sigint(int signo) {
 		ws->stop();
 }
 
-/* pretty print CLI options */
-#define PRINTOPT(o, h) \
-  fmt::print("  {}\n      {}\n", o, h)
-#define PRINTOPT2(o, h, d) \
-  fmt::print("  {}\n      {} (default: {})\n", o, h, d)
-
-int main(int argc, char **argv) {
+static void
+run_server(const std::string &registry="/usr/share/tuberd/registry.py",
+	   const std::string &json="json",
+	   bool orjson_with_numpy=false,
+	   int port=80,
+	   const std::string &webroot="/var/www/",
+	   int max_age=3600,
+	   int verbose_level=0)
+{
 	/*
 	 * Parse command-line arguments
 	 */
 
-	int port = 80;
-	int max_age = 3600;
-	int orjson_with_numpy = 0;
-	std::string preamble = "/usr/share/tuberd/preamble.py";
-	std::string registry = "/usr/share/tuberd/registry.py";
-	std::string webroot = "/var/www/";
-	std::string json_module = "json";
-
-	const option long_opts[] = {
-		{"orjson-with-numpy", no_argument, &orjson_with_numpy, 1},
-		{"max-age", required_argument, nullptr, 'a'},
-		{"json", required_argument, nullptr, 'j'},
-		{"port", required_argument, nullptr, 'p'},
-		{"preamble", required_argument, nullptr, 'm'},
-		{"registry", required_argument, nullptr, 'r'},
-		{"webroot", required_argument, nullptr, 'w'},
-		{"verbose", required_argument, nullptr, 'v'},
-		{"help", no_argument, nullptr, 'h'},
-		{nullptr, no_argument, nullptr, 0}
-	};
-
-	while (true) {
-		const auto c = getopt_long(argc, argv, "j:p:w:v:h", long_opts, nullptr);
-		if (c == -1)
-			break;
-
-		switch (c) {
-		case 0:
-			break;
-		case 'a':
-			max_age = std::stoi(optarg);
-			break;
-		case 'j':
-			json_module = std::string(optarg);
-			break;
-		case 'p':
-			port = std::stoi(optarg);
-			break;
-		case 'r':
-			registry = std::string(optarg);
-			break;
-		case 'w':
-			webroot = std::string(optarg);
-			break;
-		case 'v':
-			verbose = static_cast<Verbose>(std::stoi(optarg));
-			break;
-		case 'h':
-		case '?':
-		default:
-			fmt::print("Usage: {} [options]\n\nOptions:\n", argv[0]);
-			PRINTOPT("-h [ --help ]", "produce help message");
-			PRINTOPT2("--max-age N",
-			    "maximum cache residency for static (file) assets", max_age);
-			PRINTOPT2("-j [ --json ] NAME",
-			    "Python JSON module to use for serialization/deserialization",
-			    json_module);
-			PRINTOPT("--orjson-with-numpy",
-			    "use ORJSON module with fast NumPy serialization support");
-			PRINTOPT2("-p [ --port ] PORT", "port", port);
-			PRINTOPT2("--registry PATH", "location of registry Python code",
-			    registry);
-			PRINTOPT2("-w [ --webroot ] PATH",
-			    "location to serve static content", webroot);
-			PRINTOPT2("-v [ --verbose ] N", "verbosity", (int)verbose);
-			return 1;
-		}
-	}
+	std::string json_module = json;
+	verbose = static_cast<Verbose>(verbose_level);
 
 	/*
 	 * Initialize Python runtime
@@ -537,70 +471,37 @@ int main(int argc, char **argv) {
 
 	/* Indicate to anyone who cares that we're running server-side */
 	setenv("TUBER_SERVER", "1", 1);
-	py::scoped_interpreter python;
-
-	/* The following fixups need these */
-	py::exec("import sys, os, sysconfig");
-
-	/* Add cwd to PYTHONPATH */
-	py::exec("sys.path.append('.');");
-
-	/* Ensure site.ENABLE_USER_SITE. This is a backwards compatibility
-	 * thing; current pybind11 doesn't need it. */
-	py::exec("sys.path.append("
-		"os.path.expanduser("
-			"'~/.local/lib/python{ver}/site-packages'"
-				".format(ver=sysconfig.get_python_version())))");
 
 	/* By default, capture warnings */
 	py::module warnings = py::module::import("warnings");
 	warnings.attr("showwarning") = py::cpp_function(showwarning);
 
 	/* Learn how the Python half lives */
-	try {
-		py::exec("import tuber.server");
-	} catch(std::exception const& e) {
-		fmt::print("Failed to import tuber.server!");
-		return 2;
-	}
+	py::module tuber = py::module::import("tuber.server");
 
 	/* Load indicated Python initialization scripts */
-	try {
-		py::eval_file(registry);
-	} catch(std::exception const& e) {
-		fmt::print(stderr, "Error executing registry {}!\n({})\n", registry, e.what());
-		return 3;
-	}
+	py::eval_file(registry);
 
 	std::map<std::string, Codec> codecs;
 	py::dict py_codecs;
 
-	try {
-		py_codecs = py::eval("tuber.server.Codecs");
-	} catch(std::exception const& e) {
-		fmt::print(stderr, "Unable to import server codecs ({})\n", e.what());
-		return 4;
-	}
+	py_codecs = tuber.attr("Codecs");
+	py::object py_describe = tuber.attr("describe");
 
 	/* Import JSON dumps function so we can use it */
-	try {
-		if(orjson_with_numpy)
-			json_module = "orjson";
+	if(orjson_with_numpy)
+		json_module = "orjson";
 
-		/* Import Python loads/dumps */
-		py::object py_codec = py_codecs[json_module.c_str()];
-		py::object py_loads = py_codec.attr("decode");
-		py::object py_dumps = py_codec.attr("encode");
+	/* Import Python loads/dumps */
+	py::object py_codec = py_codecs[json_module.c_str()];
+	py::object py_loads = py_codec.attr("decode");
+	py::object py_dumps = py_codec.attr("encode");
 
-		Codec::loads_t json_loads = [py_loads](std::string s) { return py_loads(s); };
-		Codec::dumps_t json_dumps = [py_dumps](py::object o) {
-			return py_dumps(o).cast<std::string>();
-		};
-		codecs.emplace(MIME_JSON, Codec{json_loads, json_dumps});
-	} catch(std::exception const& e) {
-		fmt::print(stderr, "Unable to import {} codec ({})\n", json_module, e.what());
-		return 4;
-	}
+	Codec::loads_t json_loads = [py_loads](std::string s) { return py_loads(s); };
+	Codec::dumps_t json_dumps = [py_dumps](py::object o) {
+		return py_dumps(o).cast<std::string>();
+	};
+	codecs.emplace(MIME_JSON, Codec{json_loads, json_dumps});
 
 	try{
 		py::object py_codec = py_codecs["cbor"];
@@ -631,7 +532,7 @@ int main(int argc, char **argv) {
 	std::signal(SIGINT, &sigint);
 
 	/* Set up /tuber endpoint */
-	tr = std::make_unique<tuber_resource>(reg, codecs);
+	tr = std::make_unique<tuber_resource>(reg, codecs, py_describe);
 	tr->disallow_all();
 	tr->set_allowing(MHD_HTTP_METHOD_POST, true);
 	ws->register_resource("/tuber", tr.get());
@@ -654,6 +555,32 @@ int main(int argc, char **argv) {
 	} catch(std::exception const& e) {
 		fmt::print("Error: {}\n", e.what());
 	}
+}
 
-	return 0;
+
+PYBIND11_MODULE(_tuber_runtime, m) {
+	m.doc() = "Tuber server runtime library";
+
+	m.def("run_server", &run_server,
+	    "Main server runtime function that creates a webserver with a static webroot\n"
+	    "endpoint and a /tuber endpoint that parses requests via a handler function,\n"
+	    "and runs the server until an interrupt is signaled.\n\n"
+	    "Arguments\n---------\n"
+	    "registry : str\n"
+	    "    Location of registry Python code\n"
+	    "json_module : str\n"
+	    "    Python JSON module to use for serialization/deserialization\n"
+	    "orjson_with_numpy : bool\n"
+	    "    Use ORJSON module with fast NumPy serialization support\n"
+	    "port : int\n"
+	    "    Port on which to run the server\n"
+	    "webroot : str\n"
+	    "    Location to serve static content\n"
+	    "max_age : int\n"
+	    "    Maximum cache residency for static (file) assets\n"
+	    "verbose : int\n"
+	    "    Verbosity level (0-7)\n",
+	    py::arg("registry")="/usr/share/tuberd/registry.py", py::arg("json_module")="json",
+	    py::arg("orjson_with_numpy")=false, py::arg("port")=80, py::arg("webroot")="/var/www/",
+	    py::arg("max_age")=3600, py::arg("verbose")=0);
 }

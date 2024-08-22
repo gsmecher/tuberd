@@ -100,3 +100,56 @@ def describe(registry, request):
         return result_response(__doc__=doc, __signature__=sig)
 
     return error_response(f"Invalid request (object={objname}, method={methodname}, property={propertyname})")
+
+
+def main():
+    """
+    Server entry point
+    """
+
+    import argparse as ap
+    import os
+
+    P = ap.ArgumentParser(description="Tuber server")
+    P.add_argument(
+        "-r",
+        "--registry",
+        default="/usr/share/tuberd/registry.py",
+        help="Location of registry Python code",
+    )
+    P.add_argument(
+        "-j",
+        "--json",
+        default="json",
+        dest="json_module",
+        help="Python JSON module to use for serialization/deserialization",
+    )
+    P.add_argument(
+        "--orjson-with-numpy",
+        action="store_true",
+        help="Use ORJSON module with fast NumPy serialization support",
+    )
+    P.add_argument("-p", "--port", default=80, type=int, help="Port")
+    P.add_argument("-w", "--webroot", default="/var/www/", help="Location to serve static content")
+    P.add_argument(
+        "-a",
+        "--max-age",
+        default=3600,
+        type=int,
+        help="Maximum cache residency for static (file) assets",
+    )
+    P.add_argument("-v", "--verbose", type=int, default=0)
+    args = P.parse_args()
+
+    # import runtime
+    if os.getenv("CMAKE_TEST"):
+        from _tuber_runtime import run_server
+    else:
+        from ._tuber_runtime import run_server
+
+    # run
+    run_server(**vars(args))
+
+
+if __name__ == "__main__":
+    main()
