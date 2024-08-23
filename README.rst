@@ -158,3 +158,41 @@ option, for example:
 .. code:: bash
 
    CMAKE_ARGS="-DCMAKE_MODULE_PATH=/usr/local/share/cmake/Modules" pip install tuberd
+
+Benchmarking
+------------
+
+With concurrency 1 and keep-alive enabled, a 1M request benchmark can be
+generated as follows:
+
+.. code:: bash
+
+   $ sudo apt-get install apache2-utils
+   $ echo '{ "object":"Wrapper", "method":"increment", "args":[[
+        1,2,3,4,5,6,7,8,9,10,
+        1,2,3,4,5,6,7,8,9,10,
+        1,2,3,4,5,6,7,8,9,10,
+        1,2,3,4,5,6,7,8,9,10,
+        1,2,3,4,5,6,7,8,9,10,
+        1,2,3,4,5,6,7,8,9,10,
+        1,2,3,4,5,6,7,8,9,10,
+        1,2,3,4,5,6,7,8,9,10,
+        1,2,3,4,5,6,7,8,9,10,
+        1,2,3,4,5,6,7,8,9,10 ]]}' > benchmark.json
+   $ for n in `seq 100`
+     do
+         ab -q -k -n 10000 -c 1 -p benchmark.json -T application/json http://localhost:8080/tuber
+     done | awk '
+        BEGIN { delete A }
+        /Time taken/ { A[length(A)+1] = $5; }
+        END { printf("x = [ "); for(i in A) printf(A[i] ", "); print "];" }'
+
+These results are formatted suitably for the following Python snippet:
+
+.. code:: python
+
+   import matplotlib.pyplot as plt
+   plt.hist(x)
+   plt.legend()
+   plt.grid(True)
+   plt.savefig('histogram.png')
