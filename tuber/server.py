@@ -328,11 +328,6 @@ def main():
         dest="json_module",
         help="Python JSON module to use for serialization/deserialization",
     )
-    P.add_argument(
-        "--orjson-with-numpy",
-        action="store_true",
-        help="Use ORJSON module with fast NumPy serialization support",
-    )
     P.add_argument("-p", "--port", default=80, type=int, help="Port")
     P.add_argument("-w", "--webroot", default="/var/www/", help="Location to serve static content")
     P.add_argument(
@@ -355,8 +350,6 @@ def main():
         from ._tuber_runtime import run_server
 
     # prepare handler
-    if args.orjson_with_numpy:
-        args.json_module = "orjson"
     handler = RequestHandler(args.registry, args.json_module)
 
     # run

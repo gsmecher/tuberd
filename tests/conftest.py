@@ -14,15 +14,15 @@ def pytest_addoption(parser):
     # Create a pass-through path for tuberd options (e.g. for verbosity)
     parser.addoption("--tuberd-option", action="append", default=[])
 
-    # The "--orjson-with-numpy" option is handled as a special case because it
+    # The "--orjson" option is handled as a special case because it
     # changes test behaviour.
-    parser.addoption("--orjson-with-numpy", action="store_true", default=False)
+    parser.addoption("--orjson", action="store_true", default=False)
 
 
 # Some tests require orjson - the following skips them unless we're in
-# --orjson-with-numpy mode.
+# --orjson mode.
 def pytest_collection_modifyitems(config, items):
-    if config.getoption("orjson_with_numpy"):
+    if config.getoption("orjson"):
         return
 
     for item in items:
