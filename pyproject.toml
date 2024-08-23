@@ -39,5 +39,5 @@ line-length = 120
 before-all = "./wheels/install_deps.sh"
 test-command = [
     "pytest -sv {project}/tests/test.py --import-mode append",
-    "pytest -sv {project}/tests/test.py --import-mode append --orjson-with-numpy",
+    "pytest -sv {project}/tests/test.py --import-mode append --orjson",
 ]

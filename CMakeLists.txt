@@ -47,7 +47,7 @@ add_test(NAME test-native-json
 
 add_test(NAME test-orjson-fastpath
 	WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-	COMMAND tests/test.py --orjson-with-numpy)
+	COMMAND tests/test.py --orjson)
 
 set_tests_properties(test-native-json test-orjson-fastpath
 	PROPERTIES ENVIRONMENT "CMAKE_TEST=1;PATH=${CMAKE_BINARY_DIR}:$ENV{PATH};PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}")

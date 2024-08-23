@@ -139,12 +139,12 @@ def tuberd(pytestconfig):
 
     argv.extend(pytestconfig.getoption("tuberd_option"))
 
-    if pytestconfig.getoption("orjson_with_numpy"):
+    if pytestconfig.getoption("orjson"):
         # If we can't import orjson here, it's presumably missing from the
         # tuberd execution environment as well - in which case, we should skip
         # the test.
         pytest.importorskip("orjson")
-        argv.append("--orjson-with-numpy")
+        argv.extend(["--json", "orjson"])
 
     s = subprocess.Popen(argv)
     yield s
