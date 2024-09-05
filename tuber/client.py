@@ -43,7 +43,7 @@ def resolve_simple(hostname: str, objname: str | None = None, accept_types: list
     return instance
 
 
-def attribute_blacklisted(name):
+def attribute_blacklisted(name: str):
     """
     Keep Python-specific attributes from being treated as potential remote
     resources. This blacklist covers SQLAlchemy, IPython, and Tuber internals.
@@ -61,21 +61,21 @@ def attribute_blacklisted(name):
     return False
 
 
-def tuber_wrapper(func, props):
+def tuber_wrapper(func: callable, meta: "TuberResult"):
     """
     Annotate the wrapper function with docstrings and signature.
     """
 
     # Attach docstring, if provided and valid
     try:
-        func.__doc__ = textwrap.dedent(props.__doc__)
+        func.__doc__ = textwrap.dedent(meta.__doc__)
     except:
         pass
 
     # Attach a function signature, if provided and valid
     try:
         # build a dummy function to parse its signature with inspect
-        code = compile(f"def sigfunc{props.__signature__}:\n pass", "sigfunc", "single")
+        code = compile(f"def sigfunc{meta.__signature__}:\n pass", "sigfunc", "single")
         exec(code, globals())
         sig = inspect.signature(sigfunc)
         func.__signature__ = sig
@@ -85,29 +85,64 @@ def tuber_wrapper(func, props):
     return func
 
 
-class SubContext:
-    """A container for attributes of a top-level (registry) Context object"""
+def get_object_name(parent: str, attr: str | None = None, item: str | int | None = None):
+    """
+    Construct a valid object name for accessing objects in a registry.
 
-    def __init__(self, objname: str, methods: list[str] | None, parent: "SimpleContext", **kwargs):
+    Arguments
+    ---------
+    parent : str
+        Parent object name
+    attr : str
+        If supplied, this attribute name is joined with the parent name as "parent.attr".
+    item : str or int
+        If supplied, this item name is treated as an index into the parent as "parent[item]".
+
+    Returns
+    -------
+    objname: str
+        A valid object name.
+    """
+    if attr is not None:
+        if item is not None:
+            raise ValueError("Only one of 'attr' or 'item' arguments may be provided")
+        return f"{parent}.{attr}"
+    elif item is not None:
+        return f"{parent}[{repr(item)}]"
+    return parent
+
+
+class SubContext:
+    """A container for attributes of a Context object"""
+
+    def __init__(self, objname: str, parent: "SimpleContext", attrname: str | None = None, **kwargs):
         self.objname = objname
-        self.methods = methods
+        self.attrname = attrname
         self.parent = parent
         self.ctx_kwargs = kwargs
+        self.container = {}
+
+    def __call__(self, *args, **kwargs):
+        """method-like sub-context"""
+        kwargs.update(self.parent.ctx_kwargs)
+        kwargs.update(self.ctx_kwargs)
+        return self.parent._add_call(object=self.objname, method=self.attrname, args=args, kwargs=kwargs)
+
+    def __getitem__(self, item: str | int):
+        """container-like sub-context"""
+        if item not in self.container:
+            objname = get_object_name(self.objname, attr=self.attrname)
+            objname = get_object_name(objname, item=item)
+            self.container[item] = SubContext(objname, parent=self.parent)
+        return self.container[item]
 
     def __getattr__(self, name: str):
+        """object-like sub-context"""
         if attribute_blacklisted(name):
             raise AttributeError(f"{name} is not a valid method or property!")
 
-        # Short-circuit for resolved objects
-        if self.methods is not None and name not in self.methods:
-            raise AttributeError(f"{name} is not a valid method or property!")
-
-        # Call the parent context with this object name and its method
-        def caller(*args, **kwargs):
-            kwargs.update(self.parent.ctx_kwargs)
-            kwargs.update(self.ctx_kwargs)
-            return self.parent._add_call(object=self.objname, method=name, args=args, kwargs=kwargs)
-
+        objname = get_object_name(self.objname, attr=self.attrname)
+        caller = SubContext(objname, attrname=name, parent=self.parent)
         setattr(self, name, caller)
         return caller
 
@@ -133,6 +168,7 @@ class SimpleContext:
                     raise ValueError(f"Unsupported accept type: {accept_type}")
             self.accept_types = accept_types
         self.ctx_kwargs = ctx_kwargs
+        self.container = {}
 
     def __enter__(self):
         return self
@@ -141,51 +177,27 @@ class SimpleContext:
         if self.calls:
             self()
 
-    def _add_call(self, **request):
-        self.calls.append(request)
+    def __getitem__(self, item: str | int):
+        if item not in self.container:
+            objname = get_object_name(self.obj._tuber_objname, item=item)
+            self.container[item] = SubContext(objname, parent=self)
+        return self.container[item]
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str):
         if attribute_blacklisted(name):
             raise AttributeError(f"{name} is not a valid method or property!")
 
         # Queue methods of registry entries using the top-level registry context
         if self.obj._tuber_objname is None:
-            # Short-circuit for resolved objects
-            try:
-                objects = self.obj._tuber_meta.objects
-            except AttributeError:
-                objects = None
-            if objects is not None and name not in objects:
-                raise AttributeError(f"{name} is not a valid attribute!")
+            ctx = SubContext(name, parent=self)
+        else:
+            ctx = SubContext(self.obj._tuber_objname, attrname=name, parent=self)
 
-            try:
-                methods = getattr(self.obj, name)._tuber_meta.methods
-            except AttributeError:
-                methods = None
+        setattr(self, name, ctx)
+        return ctx
 
-            ctx = SubContext(name, methods=methods, parent=self)
-            setattr(self, name, ctx)
-            return ctx
-
-        # Short-circuit for resolved objects
-        try:
-            methods = self.obj._tuber_meta.methods
-        except AttributeError:
-            methods = None
-        if methods is not None and name not in methods:
-            raise AttributeError(f"{name} is not a valid method or property!")
-
-        # Queue methods calls.
-        def caller(*args, **kwargs):
-            # Add extra arguments where they're provided
-            kwargs.update(self.ctx_kwargs)
-
-            # ensure that a new unique future is returned
-            # each time this function is called
-            return self._add_call(object=self.obj._tuber_objname, method=name, args=args, kwargs=kwargs)
-
-        setattr(self, name, caller)
-        return caller
+    def _add_call(self, **request):
+        self.calls.append(request)
 
     def send(self, continue_on_error: bool = False):
         """Break off a set of calls and return them for execution."""
@@ -418,13 +430,40 @@ class SimpleTuberObject:
             self._tuber_host = parent._tuber_host
             self._accept_types = parent._accept_types
 
-    def object_factory(self, objname):
+    @property
+    def is_container(self):
+        """True if object is a container (list or dict) of remote items,
+        otherwise False if resolved or None if not resolved."""
+        if hasattr(self, "_tuber_meta"):
+            return hasattr(self, "_items")
+
+    def __getattr__(self, name: str):
+        # Useful hint
+        raise AttributeError(f"'{self._tuber_objname}' has no attribute '{name}'.  Did you run tuber_resolve()?")
+
+    def __len__(self):
+        try:
+            return len(self._items)
+        except AttributeError:
+            raise TypeError(f"'{self._tuber_objname}' object has no len()")
+
+    def __getitem__(self, item: str | int):
+        try:
+            return self._items[item]
+        except AttributeError:
+            raise TypeError(f"'{self._tuber_objname}' object is not subscriptable")
+
+    def __iter__(self):
+        try:
+            return iter(self._items)
+        except AttributError:
+            raise TypeError(f"'{self._tuber_objname}' object is not iterable")
+
+    def object_factory(self, objname: str):
         """Construct a child TuberObject for the given resource name.
 
         Overload this method to create child objects using different subclasses.
         """
-        if self._tuber_objname is not None:
-            raise NotImplementedError
         return self.__class__(objname, parent=self)
 
     def tuber_context(self, **kwargs):
@@ -432,7 +471,7 @@ class SimpleTuberObject:
 
         return self._context_class(self, **kwargs)
 
-    def tuber_resolve(self, force=False):
+    def tuber_resolve(self, force: bool = False):
         """Retrieve metadata associated with the remote network resource.
 
         This class retrieves object-wide metadata, which is used to build
@@ -440,63 +479,103 @@ class SimpleTuberObject:
         """
         if not force:
             try:
-                return (self._tuber_meta, self._tuber_meta_properties, self._tuber_meta_methods)
+                return self._tuber_meta
             except AttributeError:
                 pass
 
         with self.tuber_context() as ctx:
-            ctx._add_call(object=self._tuber_objname)
+            ctx._add_call(object=self._tuber_objname, resolve=True)
             meta = ctx()
             meta = meta[0]
 
-            if self._tuber_objname is not None:
-                for p in meta.properties:
-                    ctx._add_call(object=self._tuber_objname, property=p)
-                prop_list = ctx()
+        return self._resolve_meta(meta)
 
-                for m in meta.methods:
-                    ctx._add_call(object=self._tuber_objname, property=m)
-                meth_list = ctx()
+    @staticmethod
+    def _resolve_method(name: str, meta: "TuberResult"):
+        """Resolve a remote method call into a callable function"""
 
-                props = dict(zip(meta.properties, prop_list))
-                methods = dict(zip(meta.methods, meth_list))
-            else:
-                props = methods = None
+        def invoke(self, *args, **kwargs):
+            with self.tuber_context() as ctx:
+                getattr(ctx, name)(*args, **kwargs)
+                results = ctx()
+            return results[0]
 
-        # Top-level registry entries
-        for objname in getattr(meta, "objects", []):
-            obj = self.object_factory(objname)
-            obj.tuber_resolve()
+        return tuber_wrapper(invoke, meta)
+
+    def _resolve_object(
+        self, attr: str | None = None, item: str | int | None = None, meta: "TuberResult" | None = None
+    ):
+        """Create a TuberObject representing the given attribute or container
+        item, resolving any supplied metadata."""
+        assert attr is not None or item is not None, "One of attr or item required"
+        if self._tuber_objname is None:
+            objname = attr
+        else:
+            objname = get_object_name(self._tuber_objname, attr=attr, item=item)
+        obj = self.object_factory(objname)
+        if meta is not None:
+            obj._resolve_meta(meta)
+        return obj
+
+    def _resolve_meta(self, meta: "TuberResult"):
+        """Parse metadata packet and recursively resolve all attributes."""
+        # docstring
+        if hasattr(meta, "__doc__"):
+            self.__doc__ = meta.__doc__
+
+        # object attributes
+        for objname in getattr(meta, "objects", []) or []:
+            objmeta = getattr(meta.objects, objname)
+            obj = self._resolve_object(attr=objname, meta=objmeta)
             setattr(self, objname, obj)
 
-        for propname in getattr(meta, "properties", []):
-            setattr(self, propname, props[propname])
+        # methods
+        for methname in getattr(meta, "methods", []) or []:
+            method = getattr(meta.methods, methname)
+            if not callable(method):
+                method = self._resolve_method(methname, method)
+                # create method once and bind to each item in a container
+                setattr(meta.methods, methname, method)
+            setattr(self, methname, types.MethodType(method, self))
 
-        for methname in getattr(meta, "methods", []):
-            # Generate a callable prototype
-            def invoke_wrapper(name, props):
-                def invoke(self, *args, **kwargs):
-                    with self.tuber_context() as ctx:
-                        getattr(ctx, name)(*args, **kwargs)
-                        results = ctx()
-                    return results[0]
+        # static properties
+        for propname in getattr(meta, "properties", []) or []:
+            setattr(self, propname, getattr(meta.properties, propname))
 
-                return tuber_wrapper(invoke, props)
+        # container of objects
+        if hasattr(meta, "container"):
+            if meta.container == "list":
+                keys = range(len(meta.items))
+                metaitems = meta.items
+                items = [None] * len(keys)
+            elif meta.container == "dict":
+                keys = list(meta.items)
+                metaitems = meta.items.__dict__
+                items = dict()
+            else:
+                raise ValueError(f"Invalid container type {meta.container}")
 
-            invoke = invoke_wrapper(methname, methods[methname])
+            for k in keys:
+                objmeta = metaitems[k]
+                # populate common metadata elements
+                objmeta.__doc__ = meta.item_doc
+                objmeta.methods = meta.item_methods
+                obj = self._resolve_object(item=k, meta=objmeta)
+                items[k] = obj
 
-            # Associate as a class method.
-            setattr(self, methname, types.MethodType(invoke, self))
+            self._items = items
 
-        self.__doc__ = meta.__doc__
+            if meta.container == "dict":
+                setattr(self, "keys", types.MethodType(lambda o: o._items.keys(), self))
+                setattr(self, "values", types.MethodType(lambda o: o._items.values(), self))
+                setattr(self, "items", types.MethodType(lambda o: o._items.items(), self))
+
         self._tuber_meta = meta
-        self._tuber_meta_properties = props
-        self._tuber_meta_methods = methods
-        return (meta, props, methods)
+        return meta
 
 
 class TuberObject(SimpleTuberObject):
-    """A base class for TuberObjects.
+    """A base class for async TuberObjects.
 
     This is a great way of using Python to correspond with network resources
     over a HTTP tunnel. It hides most of the gory details and makes your
@@ -507,7 +586,7 @@ class TuberObject(SimpleTuberObject):
 
     _context_class = Context
 
-    async def tuber_resolve(self, force=False):
+    async def tuber_resolve(self, force: bool = False):
         """Retrieve metadata associated with the remote network resource.
 
         This class retrieves object-wide metadata, which is used to build
@@ -515,58 +594,28 @@ class TuberObject(SimpleTuberObject):
         """
         if not force:
             try:
-                return (self._tuber_meta, self._tuber_meta_properties, self._tuber_meta_methods)
+                return self._tuber_meta
             except AttributeError:
                 pass
 
         async with self.tuber_context() as ctx:
-            ctx._add_call(object=self._tuber_objname)
+            ctx._add_call(object=self._tuber_objname, resolve=True)
             meta = await ctx()
             meta = meta[0]
 
-            if self._tuber_objname is not None:
-                for p in meta.properties:
-                    ctx._add_call(object=self._tuber_objname, property=p)
-                prop_list = await ctx()
+        return self._resolve_meta(meta)
 
-                for m in meta.methods:
-                    ctx._add_call(object=self._tuber_objname, property=m)
-                meth_list = await ctx()
+    @staticmethod
+    def _resolve_method(name: str, meta: "TuberResult"):
+        """Resolve a remote method call into an async callable function"""
 
-                props = dict(zip(meta.properties, prop_list))
-                methods = dict(zip(meta.methods, meth_list))
-            else:
-                props = methods = None
+        async def invoke(self, *args, **kwargs):
+            async with self.tuber_context() as ctx:
+                getattr(ctx, name)(*args, **kwargs)
+                results = await ctx()
+            return results[0]
 
-        # Top-level registry entries
-        for objname in getattr(meta, "objects", []):
-            obj = self.object_factory(objname)
-            await obj.tuber_resolve()
-            setattr(self, objname, obj)
-
-        for propname in getattr(meta, "properties", []):
-            setattr(self, propname, props[propname])
-
-        for methname in getattr(meta, "methods", []):
-            # Generate a callable prototype
-            def invoke_wrapper(name, props):
-                async def invoke(self, *args, **kwargs):
-                    async with self.tuber_context() as ctx:
-                        result = getattr(ctx, name)(*args, **kwargs)
-                    return await result
-
-                return tuber_wrapper(invoke, props)
-
-            invoke = invoke_wrapper(methname, methods[methname])
-
-            # Associate as a class method.
-            setattr(self, methname, types.MethodType(invoke, self))
-
-        self.__doc__ = meta.__doc__
-        self._tuber_meta = meta
-        self._tuber_meta_properties = props
-        self._tuber_meta_methods = methods
-        return (meta, props, methods)
+        return tuber_wrapper(invoke, meta)
 
 
 # vim: sts=4 ts=4 sw=4 tw=78 smarttab expandtab

@@ -1,4 +1,4 @@
-#!/usr/bin/env -S pytest -sv
+#!/usr/bin/env -S pytest -svv
 
 import aiohttp
 import asyncio
@@ -18,6 +18,7 @@ except ImportError:
     from tuber.tests import test_module as tm
 import tuber
 from tuber import codecs
+from tuber.server import TuberContainer
 import weakref
 import warnings
 import cbor2
@@ -51,6 +52,11 @@ class ObjectWithProperty:
 class ObjectWithPrivateMethod:
     def __private_method(self):
         raise RuntimeError("how did you get here?")
+
+
+class ObjectWithContainerProperties:
+    property_objects = TuberContainer([ObjectWithProperty(), ObjectWithProperty()])
+    method_objects = TuberContainer({"a": ObjectWithMethod(), "b": ObjectWithMethod()})
 
 
 class Types:
@@ -114,6 +120,12 @@ registry = {
     "ObjectWithMethod": ObjectWithMethod(),
     "ObjectWithProperty": ObjectWithProperty(),
     "ObjectWithPrivateMethod": ObjectWithPrivateMethod(),
+    "ObjectWithContainerProperties": ObjectWithContainerProperties(),
+    "ObjectList": TuberContainer([ObjectWithContainerProperties(), ObjectWithContainerProperties()]),
+    "ObjectDict": TuberContainer({"a": ObjectWithContainerProperties(), "b": ObjectWithContainerProperties()}),
+    "ObjectListList": TuberContainer(
+        [TuberContainer([ObjectWithContainerProperties()]), TuberContainer([ObjectWithContainerProperties])]
+    ),
     "Types": Types(),
     "NumPy": NumPy(),
     "Warnings": WarningsClass(),
@@ -210,22 +222,48 @@ def Failed(warnings=None, **kwargs):
     return dict(error=kwargs)
 
 
+container_success = Succeeded(
+    __doc__=TuberContainer.__doc__.strip(),
+    methods=["resolve"],
+    objects=[],
+    properties=["_tuber_container"],
+)
+
+
 def test_empty_request_array(tuber_call):
     assert tuber_call(json=[]) == []
 
 
 def test_describe(tuber_call):
     assert tuber_call(json={}) == Succeeded(objects=list(registry))
-    assert tuber_call(object="ObjectWithPrivateMethod") == Succeeded(__doc__=None, methods=[], properties=[])
+    assert tuber_call(object="ObjectWithPrivateMethod") == Succeeded(
+        __doc__=None, methods=[], objects=[], properties=[]
+    )
+
+    assert tuber_call(object="ObjectWithContainerProperties", property="property_objects") == container_success
+    assert tuber_call(object="ObjectWithContainerProperties", property="method_objects") == container_success
+    assert tuber_call(object="ObjectWithContainerProperties.property_objects[0]") == Succeeded(
+        __doc__=None, methods=[], objects=[], properties=["PROPERTY"]
+    )
+    assert tuber_call(object='ObjectWithContainerProperties.method_objects["a"]') == Succeeded(
+        __doc__=None, methods=["method"], objects=[], properties=[]
+    )
+
+    assert tuber_call(object="ObjectList") == container_success
+    assert tuber_call(object="ObjectListList[0]") == container_success
+    assert tuber_call(object="ObjectDict") == container_success
+    assert tuber_call(object='ObjectDict["a"]') == Succeeded(
+        __doc__=None, methods=[], objects=["method_objects", "property_objects"], properties=[]
+    )
 
 
 def test_fetch_null_metadata(tuber_call):
-    assert tuber_call(object="NullObject") == Succeeded(__doc__=None, methods=[], properties=[])
+    assert tuber_call(object="NullObject") == Succeeded(__doc__=None, methods=[], objects=[], properties=[])
 
 
 def test_call_nonexistent_object(tuber_call):
     assert tuber_call(object="NothingHere") == Failed(
-        message="Request for an object (NothingHere) that wasn't in the registry!"
+        message="AttributeError: 'TuberRegistry' object has no attribute 'NothingHere' (Invalid object name 'NothingHere')"
     )
 
 
@@ -260,6 +298,22 @@ def test_function_types_with_correct_argument_types(tuber_call):
     assert tuber_call(object="Types", method="list_function", args=[[3, 4, 5, 6]]) == Succeeded([3, 4, 5, 6])
     assert tuber_call(object="Types", method="dict_function", args=[dict(one="two", three="four")]) == Succeeded(
         one="two", three="four"
+    )
+
+
+def test_container_properties(tuber_call):
+    assert tuber_call(object="ObjectWithContainerProperties.property_objects[0]", property="PROPERTY") == Succeeded(
+        "expected property value"
+    )
+    assert tuber_call(object='ObjectWithContainerProperties.method_objects["a"]', method="method") == Succeeded(
+        "expected return value"
+    )
+    assert tuber_call(object="ObjectList[0].method_objects['a']", method="method") == Succeeded("expected return value")
+    assert tuber_call(object='ObjectDict["a"].property_objects[0]', property="PROPERTY") == Succeeded(
+        "expected property value"
+    )
+    assert tuber_call(object="ObjectListList[1][0].method_objects['a']", method="method") == Succeeded(
+        "expected return value"
     )
 
 
@@ -655,10 +709,12 @@ async def test_tuberpy_registry_context(tuber_call, accept_types, simple):
             ctx.Types.integer_function()
             r1, r2 = ctx()
 
-            with pytest.raises(AttributeError):
+            with pytest.raises(tuber.TuberRemoteError):
                 ctx.Wrapper.not_a_function()
-            with pytest.raises(AttributeError):
+                ctx()
+            with pytest.raises(tuber.TuberRemoteError):
                 ctx.NotAnAttribute.not_a_function()
+                ctx()
 
     else:
         async with s.tuber_context() as ctx:
@@ -666,10 +722,12 @@ async def test_tuberpy_registry_context(tuber_call, accept_types, simple):
             ctx.Types.integer_function()
             r1, r2 = await ctx()
 
-            with pytest.raises(AttributeError):
+            with pytest.raises(tuber.TuberRemoteError):
                 ctx.Wrapper.not_a_function()
-            with pytest.raises(AttributeError):
+                await ctx()
+            with pytest.raises(tuber.TuberRemoteError):
                 ctx.NotAnAttribute.not_a_function()
+                await ctx()
 
     assert r1 == [2, 3, 4]
     assert r2 == Types.INTEGER
@@ -741,3 +799,57 @@ async def test_tuberpy_continue_errors(tuber_call, accept_types, simple, continu
     if simple:
         assert isinstance(r2, tuber.TuberRemoteError)  # this is an error response returned as a result
     assert r3 == [6, 7, 7]
+
+
+@pytest.mark.parametrize("simple", [True, False])
+@pytest.mark.parametrize("accept_types", ACCEPT_TYPES)
+@pytest.mark.asyncio
+async def test_tuberpy_containers(tuber_call, accept_types, simple):
+    """Test dynamic attributes and container access"""
+    s = await resolve(accept_types=accept_types, simple=simple)
+
+    assert len(s.ObjectList) == 2
+    assert len(s.ObjectListList) == 2
+    assert len(s.ObjectListList[0]) == 1
+    assert len(s.ObjectDict) == 2
+    assert list(s.ObjectDict.keys()) == ["a", "b"]
+    assert len(s.ObjectWithContainerProperties.property_objects) == 2
+    assert list(s.ObjectWithContainerProperties.method_objects.keys()) == ["a", "b"]
+    assert s.ObjectWithContainerProperties.property_objects[0].PROPERTY == "expected property value"
+
+    r1 = s.ObjectList[0].method_objects["a"].method()
+    r2 = s.ObjectListList[1][0].method_objects["a"].method()
+    r3 = s.ObjectDict["a"].method_objects["a"].method()
+    r4 = s.ObjectWithContainerProperties.method_objects["b"].method()
+
+    if not simple:
+        r1 = await r1
+        r2 = await r2
+        r3 = await r3
+        r4 = await r4
+
+    assert all([x == "expected return value" for x in [r1, r2, r3, r4]])
+
+
+@pytest.mark.parametrize("simple", [True, False])
+@pytest.mark.parametrize("accept_types", ACCEPT_TYPES)
+@pytest.mark.asyncio
+async def test_tuberpy_container_context(tuber_call, accept_types, simple):
+    """Ensure containers work in contexts"""
+    s = await resolve(accept_types=accept_types, simple=simple)
+
+    if simple:
+        with s.tuber_context() as ctx:
+            for idx, obj in enumerate(s.ObjectList):
+                for k in obj.method_objects.keys():
+                    ctx.ObjectList[idx].method_objects[k].method()
+            r1 = ctx()
+
+    else:
+        async with s.tuber_context() as ctx:
+            for idx, obj in enumerate(s.ObjectList):
+                for k in obj.method_objects.keys():
+                    ctx.ObjectList[idx].method_objects[k].method()
+            r1 = await ctx()
+
+    assert all([x == "expected return value" for x in r1])

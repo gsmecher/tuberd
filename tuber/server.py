@@ -1,5 +1,8 @@
 import inspect
 import warnings
+from .codecs import Codecs, TuberResult
+
+__all__ = ["TuberContainer", "run"]
 
 
 # request handling
@@ -21,6 +24,172 @@ def error_response(message):
     return {"error": {"message": message}}
 
 
+def resolve_method(method):
+    """
+    Return a description of a method.
+    """
+    doc = inspect.getdoc(method)
+    sig = None
+    try:
+        sig = str(inspect.signature(method))
+    except:
+        # pybind docstrings include a signature as the first line
+        if doc and doc.startswith(method.__name__ + "("):
+            if "\n" in doc:
+                sig, doc = doc.split("\n", 1)
+                doc = doc.strip()
+            else:
+                sig = doc
+                doc = None
+            sig = "(" + sig.split("(", 1)[1]
+
+    return dict(__doc__=doc, __signature__=sig)
+
+
+def resolve_object(obj, simple=False, only_attrs=None):
+    """
+    Return a dictionary of all valid object attributes classified by type.
+    If simple=False, return dictionaries with complete descriptions of all
+    child attributes, recursing through the entire object tree.
+    If only_attrs is given, only include these attributes in the output set.
+
+    objects: TuberContainer objects that are to be further resolved
+    methods: Callable attributes
+    properties: Static property attributes
+    """
+
+    if not simple and isinstance(obj, TuberContainer):
+        return obj.resolve()
+
+    objects = {}
+    methods = {}
+    props = {}
+    clsname = obj.__class__.__name__
+
+    if only_attrs is None:
+        only_attrs = dir(obj)
+
+    for d in only_attrs:
+        # Don't export dunder methods or attributes - this avoids exporting
+        # Python internals on the server side to any client.
+        if d.startswith("__") or d.startswith(f"_{clsname}__"):
+            continue
+        attr = getattr(obj, d)
+        if getattr(attr, "__tuber_object__", False):
+            objects[d] = True if simple else resolve_object(attr)
+        elif callable(attr):
+            methods[d] = True if simple else resolve_method(attr)
+        else:
+            props[d] = attr
+
+    if simple:
+        objects = list(objects)
+        methods = list(methods)
+        props = list(props)
+
+    return dict(__doc__=inspect.getdoc(obj), objects=objects, methods=methods, properties=props)
+
+
+class TuberContainer:
+    """Container for grouping objects of the same type"""
+
+    __tuber_object__ = True
+
+    def __init__(self, data):
+        """
+        Arguments
+        ---------
+        data : list or dict
+            All values in the collection are assumed to have the same set of methods and properties.
+        """
+        if isinstance(data, list):
+            if not data:
+                raise ValueError("Empty list container")
+            values = data
+        elif isinstance(data, dict):
+            if not data:
+                raise ValueError("Empty dict container")
+            values = list(data.values())
+        else:
+            raise TypeError("Invalid container type")
+
+        # Ensure that all objects are the same type
+        tp = type(values[0])
+        for v in values:
+            # check for exact match
+            if type(v) != tp:
+                raise TypeError(f"All entries must be of type {tp}")
+
+        self._tuber_container = type(data).__name__
+        self.__data = data
+
+    def resolve(self):
+        """
+        Return a dict with descriptions of all items in the collection, with
+        sufficient information to reconstruct the collection on the client side.
+        """
+        if self._tuber_container == "list":
+            out = [None] * len(self.__data)
+            keys = range(len(out))
+        else:
+            out = {}
+            keys = self.__data.keys()
+
+        item_attrs = None
+        doc = None
+        methods = None
+        for k in keys:
+            res = resolve_object(self.__data[k], only_attrs=item_attrs)
+            if "container" not in res:
+                if item_attrs is None:
+                    doc = res.pop("__doc__", None)
+                    methods = res.pop("methods", {})
+                    item_attrs = list(res.get("objects", [])) + list(res.get("properties", []))
+                else:
+                    res.pop("__doc__", None)
+                    res.pop("methods", None)
+            out[k] = res
+
+        return {"container": self._tuber_container, "item_doc": doc, "item_methods": methods, "items": out}
+
+    def __getattr__(self, name):
+        return getattr(self.__data, name)
+
+    def __len__(self):
+        return len(self.__data)
+
+    def __iter__(self):
+        return iter(self.__data)
+
+    def __getitem__(self, item):
+        if isinstance(item, slice):
+            return TuberContainer(self.__data[item])
+        return self.__data[item]
+
+
+class TuberRegistry(TuberResult):
+    """
+    Registry class.
+    """
+
+    def __getitem__(self, objname):
+        """
+        Extract an object from the registry for the given name.  The object name
+        may be a simple string name for the registry entry, or an attribute
+        accessor.  For example, the name
+
+            "Class.Attribute[0]"
+
+        results in the object
+
+            registry["Class"].Attribute[0]
+        """
+        try:
+            return eval(f"self.{objname}")
+        except Exception as e:
+            raise e.__class__(f"{str(e)} (Invalid object name '{objname}')")
+
+
 def describe(registry, request):
     """
     Tuber slow path
@@ -32,6 +201,7 @@ def describe(registry, request):
 
     - A registry descriptor (no "object" or "method" or "property")
     - An object descriptor ("object" but no "method" or "property")
+    - A container descriptor ("object" and a "property" corresponding to a container)
     - A method descriptor ("object" and a "property" corresponding to a method)
     - A property descriptor ("object" and a "property" that is static data)
 
@@ -42,66 +212,42 @@ def describe(registry, request):
     objname = request["object"] if "object" in request else None
     methodname = request["method"] if "method" in request else None
     propertyname = request["property"] if "property" in request else None
+    resolve = request["resolve"] if "resolve" in request else False
 
     if not objname and not methodname and not propertyname:
         # registry metadata
-        return result_response(objects=list(registry))
+        if resolve:
+            objects = {obj: resolve_object(registry[obj]) for obj in registry}
+        else:
+            objects = list(registry)
+        return result_response(objects=objects)
 
-    try:
-        obj = registry[objname]
-    except KeyError:
-        return error_response(f"Request for an object ({objname}) that wasn't in the registry!")
+    obj = registry[objname]
 
     if not methodname and not propertyname:
         # Object metadata.
-        methods = []
-        properties = []
-        clsname = obj.__class__.__name__
-
-        for c in dir(obj):
-            # Don't export dunder methods or attributes - this avoids exporting
-            # Python internals on the server side to any client.
-            if c.startswith("__") or c.startswith(f"_{clsname}__"):
-                continue
-
-            if callable(getattr(obj, c)):
-                methods.append(c)
-            else:
-                properties.append(c)
-
-        return result_response(__doc__=inspect.getdoc(obj), methods=methods, properties=properties)
+        return result_response(**resolve_object(obj, simple=not resolve))
 
     if propertyname:
         # Sanity check
         if not hasattr(obj, propertyname):
-            return error_response(f"{propertyname} is not a method or property of object {objname}")
+            raise AttributeError(f"'{objname}' object has no attribute '{propertyname}'")
 
         # Returning a method description or property evaluation
         attr = getattr(obj, propertyname)
+
+        # Complex case: return a description of an object
+        if getattr(attr, "__tuber_object__", False):
+            return result_response(**resolve_object(attr, simple=not resolve))
 
         # Simple case: just a property evaluation
         if not callable(attr):
             return result_response(attr)
 
         # Complex case: return a description of a method
-        doc = inspect.getdoc(attr)
-        sig = None
-        try:
-            sig = str(inspect.signature(attr))
-        except:
-            # pybind docstrings include a signature as the first line
-            if doc and doc.startswith(attr.__name__ + "("):
-                if "\n" in doc:
-                    sig, doc = doc.split("\n", 1)
-                    doc = doc.strip()
-                else:
-                    sig = doc
-                    doc = None
-                sig = "(" + sig.split("(", 1)[1]
+        return result_response(**resolve_method(attr))
 
-        return result_response(__doc__=doc, __signature__=sig)
-
-    return error_response(f"Invalid request (object={objname}, method={methodname}, property={propertyname})")
+    raise ValueError(f"Invalid request ({request})")
 
 
 def invoke(registry, request):
@@ -122,13 +268,9 @@ def invoke(registry, request):
             return describe(registry, request)
 
         objname = request["object"]
+        obj = registry[objname]
+
         methodname = request["method"]
-
-        try:
-            obj = registry[objname]
-        except KeyError:
-            raise AttributeError(f"Object '{objname}' not found in registry.")
-
         method = getattr(obj, methodname)
 
         args = request.get("args", [])
@@ -159,31 +301,23 @@ class RequestHandler:
     Tuber server request handler.
     """
 
-    def __init__(self, reg, json_module="json", default_format="application/json"):
+    def __init__(self, registry, json_module="json", default_format="application/json"):
         """
         Arguments
         ---------
-        reg : dict or str
-            Dictionary of user-defined objects with properties and methods,
-            or a path to a python file that can be executed to load a registry
-            dictionary into the current namespace.
+        registry : dict
+            Dictionary of user-defined objects with properties and methods.
         json_module : str
             Python package to use for encoding and decoding JSON requests.
         default_format : str
             Default encoding format to assume for requests and responses.
         """
-        # load the registry file and make sure it contains a registry dictionary
-        if isinstance(reg, str):
-            code = compile(open(reg, "r").read(), reg, "exec")
-            exec(code, globals())
-            assert isinstance(registry, dict), "Invalid registry"
-            reg = registry
-
-        self.registry = reg
-        self.codecs = {}
+        # ensure registry is a dictionary
+        assert isinstance(registry, dict), "Invalid registry"
+        self.registry = TuberRegistry(registry)
 
         # populate codecs
-        from .codecs import Codecs
+        self.codecs = {}
 
         try:
             self.codecs["application/json"] = Codecs[json_module]
@@ -306,6 +440,47 @@ class RequestHandler:
         return self.handle(*args, **kwargs)
 
 
+def run(registry, json_module="json", port=80, webroot="/var/www/", max_age=3600, verbose=0):
+    """
+    Run tuber server with the given registry.
+
+    Arguments
+    ---------
+    registry : dict
+        Dictionary of user-defined objects with properties and methods.
+    json_module : str
+        Python package to use for encoding and decoding JSON requests.
+    port : int
+        Port on which to run the server
+    webroot : str
+        Location to serve static content
+    max_age : int
+        Maximum cache residency for static (file) assets
+    verbose : int
+        Verbosity level (0-2)
+    """
+    # setup environment
+    os.environ["TUBER_SERVER"] = "1"
+
+    # import runtime
+    if os.getenv("CMAKE_TEST"):
+        from _tuber_runtime import run_server
+    else:
+        from ._tuber_runtime import run_server
+
+    # prepare handler
+    handler = RequestHandler(registry, json_module)
+
+    # run
+    run_server(
+        handler,
+        port=port,
+        webroot=webroot,
+        max_age=max_age,
+        verbose=verbose,
+    )
+
+
 def main():
     """
     Server entry point
@@ -343,23 +518,11 @@ def main():
     # setup environment
     os.environ["TUBER_SERVER"] = "1"
 
-    # import runtime
-    if os.getenv("CMAKE_TEST"):
-        from _tuber_runtime import run_server
-    else:
-        from ._tuber_runtime import run_server
+    code = compile(open(args.registry, "r").read(), args.registry, "exec")
+    exec(code, globals())
+    args.registry = registry
 
-    # prepare handler
-    handler = RequestHandler(args.registry, args.json_module)
-
-    # run
-    run_server(
-        handler,
-        port=args.port,
-        webroot=args.webroot,
-        max_age=args.max_age,
-        verbose=args.verbose,
-    )
+    run(**vars(args))
 
 
 if __name__ == "__main__":
