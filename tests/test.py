@@ -853,3 +853,25 @@ async def test_tuberpy_container_context(tuber_call, accept_types, simple):
             r1 = await ctx()
 
     assert all([x == "expected return value" for x in r1])
+
+
+@pytest.mark.parametrize("simple", [True, False])
+@pytest.mark.parametrize("accept_types", ACCEPT_TYPES)
+@pytest.mark.asyncio
+async def test_tuberpy_container_properties(tuber_call, accept_types, simple):
+    """Collect properties and method calls for container objects"""
+    s = await resolve(accept_types=accept_types, simple=simple)
+
+    pobjs = s.ObjectWithContainerProperties.property_objects
+    r1 = pobjs.tuber_get("PROPERTY")
+    assert len(r1) == len(pobjs)
+    assert all([x == "expected property value" for x in r1])
+
+    mobjs = s.ObjectWithContainerProperties.method_objects
+    r2 = mobjs.tuber_call("method")
+    if not simple:
+        r2 = await r2
+
+    assert len(r2) == len(mobjs)
+    assert list(r2.keys()) == list(mobjs.keys())
+    assert all([x == "expected return value" for x in r2.values()])
