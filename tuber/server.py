@@ -46,10 +46,10 @@ def resolve_method(method):
     return dict(__doc__=doc, __signature__=sig)
 
 
-def resolve_object(obj, simple=False, only_attrs=None):
+def resolve_object(obj, recursive=True, only_attrs=None):
     """
     Return a dictionary of all valid object attributes classified by type.
-    If simple=False, return dictionaries with complete descriptions of all
+    If recursive=True, return dictionaries with complete descriptions of all
     child attributes, recursing through the entire object tree.
     If only_attrs is given, only include these attributes in the output set.
 
@@ -73,13 +73,13 @@ def resolve_object(obj, simple=False, only_attrs=None):
             continue
         attr = getattr(obj, d)
         if getattr(attr, "__tuber_object__", False):
-            objects[d] = True if simple else resolve_object(attr)
+            objects[d] = resolve_object(attr) if recursive else True
         elif callable(attr):
-            methods[d] = True if simple else resolve_method(attr)
+            methods[d] = resolve_method(attr) if recursive else True
         else:
             props[d] = attr
 
-    if simple:
+    if not recursive:
         objects = list(objects)
         methods = list(methods)
         props = list(props)
@@ -87,7 +87,7 @@ def resolve_object(obj, simple=False, only_attrs=None):
     out = dict(__doc__=inspect.getdoc(obj), objects=objects, methods=methods, properties=props)
 
     # append metadata
-    if not simple and hasattr(obj, "tuber_meta"):
+    if recursive and hasattr(obj, "tuber_meta"):
         out.update(obj.tuber_meta())
 
     return out
@@ -247,7 +247,7 @@ def describe(registry, request):
 
     if not methodname and not propertyname:
         # Object metadata.
-        return result_response(**resolve_object(obj, simple=not resolve))
+        return result_response(**resolve_object(obj, recursive=resolve))
 
     if propertyname:
         # Sanity check
@@ -259,7 +259,7 @@ def describe(registry, request):
 
         # Complex case: return a description of an object
         if getattr(attr, "__tuber_object__", False):
-            return result_response(**resolve_object(attr, simple=not resolve))
+            return result_response(**resolve_object(attr, recursive=resolve))
 
         # Simple case: just a property evaluation
         if not callable(attr):
