@@ -446,11 +446,11 @@ class SimpleTuberObject:
         if not self.is_container:
             raise TypeError(f"'{self._tuber_objname}' object is not a container")
 
-        if name in list(self._tuber_meta.item_methods or []):
+        if name in self._item_methods:
             raise AttributeError("Use tuber_call for method attributes")
 
-        if self._tuber_meta.container == "list":
-            return [getattr(item, name) for item in self._items]
+        if isinstance(self._items, list):
+            return [getattr(v, name) for v in self._items]
         return {k: getattr(v, name) for k, v in self._items.items()}
 
     def tuber_call(self, method: str, *args, **kwargs):
@@ -460,10 +460,10 @@ class SimpleTuberObject:
         if not self.is_container:
             raise TypeError(f"'{self._tuber_objname}' object is not a container")
 
-        if method not in list(self._tuber_meta.item_methods or []):
+        if method not in self._item_methods:
             raise AttributeError("Use tuber_get for property attributes")
 
-        islist = self._tuber_meta.container == "list"
+        islist = isinstance(self._items, list)
         keys = range(len(self._items)) if islist else self._items.keys()
 
         with self.tuber_context() as ctx:
@@ -578,28 +578,27 @@ class SimpleTuberObject:
 
         # container of objects
         if hasattr(meta, "container"):
-            if meta.container == "list":
-                keys = range(len(meta.items))
-                metaitems = meta.items
-                items = [None] * len(keys)
-            elif meta.container == "dict":
-                keys = list(meta.items)
-                metaitems = meta.items.__dict__
-                items = dict()
-            else:
-                raise ValueError(f"Invalid container type {meta.container}")
+            cmeta = meta.container
 
-            for k in keys:
-                objmeta = metaitems[k]
-                # populate common metadata elements
-                objmeta.__doc__ = meta.item_doc
-                objmeta.methods = meta.item_methods
+            keys = getattr(cmeta, "keys", None)
+            if keys is None:
+                islist = True
+                keys = range(len(cmeta.values))
+                items = [None] * len(cmeta.values)
+            else:
+                islist = False
+                items = dict()
+
+            for k, objmeta in zip(keys, cmeta.values):
+                objmeta.__doc__ = cmeta.item_doc
+                objmeta.methods = cmeta.item_methods
                 obj = self._resolve_object(item=k, meta=objmeta)
                 items[k] = obj
 
+            self._item_methods = cmeta.item_methods
             self._items = items
 
-            if meta.container == "dict":
+            if not islist:
                 setattr(self, "keys", types.MethodType(lambda o: o._items.keys(), self))
                 setattr(self, "values", types.MethodType(lambda o: o._items.values(), self))
                 setattr(self, "items", types.MethodType(lambda o: o._items.items(), self))
@@ -658,10 +657,10 @@ class TuberObject(SimpleTuberObject):
         if not self.is_container:
             raise TypeError(f"'{self._tuber_objname}' object is not a container")
 
-        if method not in list(self._tuber_meta.item_methods or []):
+        if method not in self._item_methods:
             raise AttributeError("Use tuber_get for property attributes")
 
-        islist = self._tuber_meta.container == "list"
+        islist = isinstance(self._items, list)
         keys = range(len(self._items)) if islist else self._items.keys()
 
         async with self.tuber_context() as ctx:

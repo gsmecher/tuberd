@@ -226,7 +226,7 @@ container_success = Succeeded(
     __doc__=TuberContainer.__doc__.strip(),
     methods=["resolve"],
     objects=[],
-    properties=["_tuber_container"],
+    properties=[],
 )
 
 

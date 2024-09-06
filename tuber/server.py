@@ -120,7 +120,6 @@ class TuberContainer:
             if type(v) != tp:
                 raise TypeError(f"All entries must be of type {tp}")
 
-        self._tuber_container = type(data).__name__
         self.__data = data
 
     def resolve(self):
@@ -128,18 +127,19 @@ class TuberContainer:
         Return a dict with descriptions of all items in the collection, with
         sufficient information to reconstruct the collection on the client side.
         """
-        if self._tuber_container == "list":
-            out = [None] * len(self.__data)
-            keys = range(len(out))
+        if isinstance(self.__data, list):
+            keys = None
+            values = self.__data
         else:
-            out = {}
-            keys = self.__data.keys()
+            keys = list(self.__data.keys())
+            values = self.__data.values()
 
         item_attrs = None
         doc = None
         methods = None
-        for k in keys:
-            res = resolve_object(self.__data[k], only_attrs=item_attrs)
+        out_values = []
+        for v in values:
+            res = resolve_object(v, only_attrs=item_attrs)
             if "container" not in res:
                 if item_attrs is None:
                     doc = res.pop("__doc__", None)
@@ -148,9 +148,13 @@ class TuberContainer:
                 else:
                     res.pop("__doc__", None)
                     res.pop("methods", None)
-            out[k] = res
+            out_values.append(res)
 
-        return {"container": self._tuber_container, "item_doc": doc, "item_methods": methods, "items": out}
+        out = {"values": out_values, "item_doc": doc, "item_methods": methods}
+        if keys is not None:
+            out["keys"] = keys
+
+        return {"container": out}
 
     def __getattr__(self, name):
         return getattr(self.__data, name)
@@ -162,8 +166,6 @@ class TuberContainer:
         return iter(self.__data)
 
     def __getitem__(self, item):
-        if isinstance(item, slice):
-            return TuberContainer(self.__data[item])
         return self.__data[item]
 
 
