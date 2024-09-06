@@ -223,10 +223,7 @@ def Failed(warnings=None, **kwargs):
 
 
 container_success = Succeeded(
-    __doc__=TuberContainer.__doc__.strip(),
-    methods=["tuber_call", "tuber_meta"],
-    objects=[],
-    properties=[],
+    __doc__=TuberContainer.__doc__.strip(), methods=["tuber_call", "tuber_meta"], properties=[]
 )
 
 
@@ -236,29 +233,25 @@ def test_empty_request_array(tuber_call):
 
 def test_describe(tuber_call):
     assert tuber_call(json={}) == Succeeded(objects=list(registry))
-    assert tuber_call(object="ObjectWithPrivateMethod") == Succeeded(
-        __doc__=None, methods=[], objects=[], properties=[]
-    )
+    assert tuber_call(object="ObjectWithPrivateMethod") == Succeeded(__doc__=None, methods=[], properties=[])
 
     assert tuber_call(object="ObjectWithContainerProperties", property="property_objects") == container_success
     assert tuber_call(object="ObjectWithContainerProperties", property="method_objects") == container_success
     assert tuber_call(object="ObjectWithContainerProperties.property_objects[0]") == Succeeded(
-        __doc__=None, methods=[], objects=[], properties=["PROPERTY"]
+        __doc__=None, methods=[], properties=["PROPERTY"]
     )
     assert tuber_call(object='ObjectWithContainerProperties.method_objects["a"]') == Succeeded(
-        __doc__=None, methods=["method"], objects=[], properties=[]
+        __doc__=None, methods=["method"], properties=[]
     )
 
     assert tuber_call(object="ObjectList") == container_success
     assert tuber_call(object="ObjectListList[0]") == container_success
     assert tuber_call(object="ObjectDict") == container_success
-    assert tuber_call(object='ObjectDict["a"]') == Succeeded(
-        __doc__=None, methods=[], objects=["method_objects", "property_objects"], properties=[]
-    )
+    assert tuber_call(object='ObjectDict["a"]') == Succeeded(__doc__=None, methods=[], properties=[])
 
 
 def test_fetch_null_metadata(tuber_call):
-    assert tuber_call(object="NullObject") == Succeeded(__doc__=None, methods=[], objects=[], properties=[])
+    assert tuber_call(object="NullObject") == Succeeded(__doc__=None, methods=[], properties=[])
 
 
 def test_call_nonexistent_object(tuber_call):

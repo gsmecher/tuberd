@@ -58,13 +58,19 @@ def resolve_object(obj, recursive=True, only_attrs=None):
     properties: Static property attributes
     """
 
-    objects = {}
-    methods = {}
-    props = {}
+    if recursive:
+        objects = {}
+        methods = {}
+        props = {}
+    else:
+        methods = []
+        props = []
     clsname = obj.__class__.__name__
 
     if only_attrs is None:
         only_attrs = dir(obj)
+
+    out = dict(__doc__=inspect.getdoc(obj), methods=methods, properties=props)
 
     for d in only_attrs:
         # Don't export dunder methods or attributes - this avoids exporting
@@ -72,22 +78,29 @@ def resolve_object(obj, recursive=True, only_attrs=None):
         if d.startswith("__") or d.startswith(f"_{clsname}__"):
             continue
         attr = getattr(obj, d)
-        if getattr(attr, "__tuber_object__", False):
-            objects[d] = resolve_object(attr) if recursive else True
-        elif callable(attr):
-            methods[d] = resolve_method(attr) if recursive else True
+        if recursive:
+            if getattr(attr, "__tuber_object__", False):
+                objects[d] = resolve_object(attr)
+            elif callable(attr):
+                methods[d] = resolve_method(attr)
+            else:
+                props[d] = attr
         else:
-            props[d] = attr
+            if getattr(attr, "__tuber_object__", False):
+                # ignore nested objects when not recursing
+                continue
+            if callable(attr):
+                methods.append(d)
+            else:
+                props.append(d)
 
     if not recursive:
-        objects = list(objects)
-        methods = list(methods)
-        props = list(props)
+        return out
 
-    out = dict(__doc__=inspect.getdoc(obj), objects=objects, methods=methods, properties=props)
+    out["objects"] = objects
 
-    # append metadata
-    if recursive and hasattr(obj, "tuber_meta"):
+    # append custom metadata
+    if hasattr(obj, "tuber_meta"):
         out.update(obj.tuber_meta())
 
     return out
