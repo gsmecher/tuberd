@@ -209,17 +209,32 @@ class TuberRegistry(TuberResult):
     def __getitem__(self, objname):
         """
         Extract an object from the registry for the given name.  The object name
-        may be a simple string name for the registry entry, or an attribute
-        accessor.  For example, the name
+        may be a simple string name for the registry entry, or a list path
+        specifying the attributes and/or items to access.  For example, the path
 
-            "Class.Attribute[0]"
+            ["Class", ("Attribute", 0)]
 
         results in the object
 
             registry["Class"].Attribute[0]
         """
         try:
-            return eval(f"self.{objname}")
+            # simple object
+            if isinstance(objname, str):
+                return getattr(self, objname)
+
+            # object traversal
+            obj = self
+            for attr in objname:
+                if isinstance(attr, str):
+                    obj = getattr(obj, attr)
+                else:
+                    attr, items = attr[0], attr[1:]
+                    obj = getattr(obj, attr)
+                    for item in items:
+                        obj = obj[item]
+            return obj
+
         except Exception as e:
             raise e.__class__(f"{str(e)} (Invalid object name '{objname}')")
 

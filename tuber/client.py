@@ -85,7 +85,7 @@ def tuber_wrapper(func: callable, meta: "TuberResult"):
     return func
 
 
-def get_object_name(parent: str, attr: str | None = None, item: str | int | None = None):
+def get_object_name(parent: str | list, attr: str | None = None, item: str | int | None = None):
     """
     Construct a valid object name for accessing objects in a registry.
 
@@ -100,16 +100,25 @@ def get_object_name(parent: str, attr: str | None = None, item: str | int | None
 
     Returns
     -------
-    objname: str
+    objname: list
         A valid object name.
     """
+    if isinstance(parent, str):
+        out = [parent]
+    else:
+        out = parent
+    if item is None and attr is None:
+        return out
     if attr is not None:
-        if item is not None:
-            raise ValueError("Only one of 'attr' or 'item' arguments may be provided")
-        return f"{parent}.{attr}"
-    elif item is not None:
-        return f"{parent}[{repr(item)}]"
-    return parent
+        out = out + [attr]
+    if item is not None:
+        last = out[-1]
+        if isinstance(last, str):
+            last = [last]
+        else:
+            last = list(last)
+        out = out[:-1] + [tuple(last + [item])]
+    return out
 
 
 class SubContext:
@@ -131,8 +140,7 @@ class SubContext:
     def __getitem__(self, item: str | int):
         """container-like sub-context"""
         if item not in self.container:
-            objname = get_object_name(self.objname, attr=self.attrname)
-            objname = get_object_name(objname, item=item)
+            objname = get_object_name(self.objname, attr=self.attrname, item=item)
             self.container[item] = SubContext(objname, parent=self.parent)
         return self.container[item]
 
@@ -189,7 +197,7 @@ class SimpleContext:
 
         # Queue methods of registry entries using the top-level registry context
         if self.obj._tuber_objname is None:
-            ctx = SubContext(name, parent=self)
+            ctx = SubContext([name], parent=self)
         else:
             ctx = SubContext(self.obj._tuber_objname, attrname=name, parent=self)
 
@@ -531,7 +539,7 @@ class SimpleTuberObject:
         item, resolving any supplied metadata."""
         assert attr is not None or item is not None, "One of attr or item required"
         if self._tuber_objname is None:
-            objname = attr
+            objname = [attr]
         else:
             objname = get_object_name(self._tuber_objname, attr=attr, item=item)
         obj = self.object_factory(objname)

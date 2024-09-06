@@ -236,18 +236,19 @@ def test_describe(tuber_call):
     assert tuber_call(object="ObjectWithPrivateMethod") == Succeeded(__doc__=None, methods=[], properties=[])
 
     assert tuber_call(object="ObjectWithContainerProperties", property="property_objects") == container_success
+    assert tuber_call(object=["ObjectWithContainerProperties", "property_objects"]) == container_success
     assert tuber_call(object="ObjectWithContainerProperties", property="method_objects") == container_success
-    assert tuber_call(object="ObjectWithContainerProperties.property_objects[0]") == Succeeded(
+    assert tuber_call(object=["ObjectWithContainerProperties", ("property_objects", 0)]) == Succeeded(
         __doc__=None, methods=[], properties=["PROPERTY"]
     )
-    assert tuber_call(object='ObjectWithContainerProperties.method_objects["a"]') == Succeeded(
+    assert tuber_call(object=["ObjectWithContainerProperties", ("method_objects", "a")]) == Succeeded(
         __doc__=None, methods=["method"], properties=[]
     )
 
     assert tuber_call(object="ObjectList") == container_success
-    assert tuber_call(object="ObjectListList[0]") == container_success
+    assert tuber_call(object=[("ObjectListList", 0)]) == container_success
     assert tuber_call(object="ObjectDict") == container_success
-    assert tuber_call(object='ObjectDict["a"]') == Succeeded(__doc__=None, methods=[], properties=[])
+    assert tuber_call(object=[("ObjectDict", "a")]) == Succeeded(__doc__=None, methods=[], properties=[])
 
 
 def test_fetch_null_metadata(tuber_call):
@@ -295,17 +296,19 @@ def test_function_types_with_correct_argument_types(tuber_call):
 
 
 def test_container_properties(tuber_call):
-    assert tuber_call(object="ObjectWithContainerProperties.property_objects[0]", property="PROPERTY") == Succeeded(
-        "expected property value"
-    )
-    assert tuber_call(object='ObjectWithContainerProperties.method_objects["a"]', method="method") == Succeeded(
+    assert tuber_call(
+        object=["ObjectWithContainerProperties", ("property_objects", 0)], property="PROPERTY"
+    ) == Succeeded("expected property value")
+    assert tuber_call(object=["ObjectWithContainerProperties", ("method_objects", "a")], method="method") == Succeeded(
         "expected return value"
     )
-    assert tuber_call(object="ObjectList[0].method_objects['a']", method="method") == Succeeded("expected return value")
-    assert tuber_call(object='ObjectDict["a"].property_objects[0]', property="PROPERTY") == Succeeded(
+    assert tuber_call(object=[("ObjectList", 0), ("method_objects", "a")], method="method") == Succeeded(
+        "expected return value"
+    )
+    assert tuber_call(object=[("ObjectDict", "a"), ("property_objects", 0)], property="PROPERTY") == Succeeded(
         "expected property value"
     )
-    assert tuber_call(object="ObjectListList[1][0].method_objects['a']", method="method") == Succeeded(
+    assert tuber_call(object=[("ObjectListList", 1, 0), ("method_objects", "a")], method="method") == Succeeded(
         "expected return value"
     )
 
