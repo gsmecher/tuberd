@@ -1,5 +1,6 @@
 import inspect
 import warnings
+import functools
 from .codecs import Codecs, TuberResult
 
 __all__ = ["TuberContainer", "run"]
@@ -201,6 +202,10 @@ class TuberContainer:
         return self.__data[item]
 
 
+def agetter(obj, attr, *items):
+    return functools.reduce(lambda o, i: o[i], items, getattr(obj, attr))
+
+
 class TuberRegistry(TuberResult):
     """
     Registry class.
@@ -224,16 +229,8 @@ class TuberRegistry(TuberResult):
                 return getattr(self, objname)
 
             # object traversal
-            obj = self
-            for attr in objname:
-                if isinstance(attr, str):
-                    obj = getattr(obj, attr)
-                else:
-                    attr, items = attr[0], attr[1:]
-                    obj = getattr(obj, attr)
-                    for item in items:
-                        obj = obj[item]
-            return obj
+            objname = [[x] if isinstance(x, str) else x for x in objname]
+            return functools.reduce(lambda obj, x: agetter(obj, *x), objname, self)
 
         except Exception as e:
             raise e.__class__(f"{str(e)} (Invalid object name '{objname}')")
