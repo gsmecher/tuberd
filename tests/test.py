@@ -858,6 +858,32 @@ async def test_tuberpy_container_context(tuber_call, accept_types, simple):
 @pytest.mark.parametrize("simple", [True, False])
 @pytest.mark.parametrize("accept_types", ACCEPT_TYPES)
 @pytest.mark.asyncio
+async def test_tuberpy_container_property_context(tuber_call, accept_types, simple):
+    """Ensure methods of container objects work in contexts"""
+    s = await resolve("ObjectWithContainerProperties", accept_types=accept_types, simple=simple)
+
+    r1 = s.method_objects["a"].method()
+    if not simple:
+        r1 = await r1
+    assert r1 == "expected return value"
+
+    assert s.property_objects[0].PROPERTY == "expected property value"
+
+    if simple:
+        with s.tuber_context() as ctx:
+            ctx.method_objects["a"].method()
+            r2 = ctx()[0]
+    else:
+        async with s.tuber_context() as ctx:
+            r2 = ctx.method_objects["a"].method()
+        r2 = await r2
+
+    assert r2 == "expected return value"
+
+
+@pytest.mark.parametrize("simple", [True, False])
+@pytest.mark.parametrize("accept_types", ACCEPT_TYPES)
+@pytest.mark.asyncio
 async def test_tuberpy_container_properties(tuber_call, accept_types, simple):
     """Collect properties and method calls for container objects"""
     s = await resolve(accept_types=accept_types, simple=simple)
