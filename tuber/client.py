@@ -441,39 +441,27 @@ class SimpleTuberObject:
         # Useful hint
         raise AttributeError(f"'{self._tuber_objname}' has no attribute '{name}'.  Did you run tuber_resolve()?")
 
-    def tuber_get(self, name: str):
-        """If object is a container, return a container of property values"""
+    def tuber_get(self, name: str, keys: list[str | int] | None = None):
+        """Get a property of every container item.
+
+        If object is a container, return a list of property values for each
+        item.  If `keys` is supplied, return only the values corresponding to
+        the given set of container items.
+        """
         if not self.is_container:
             raise TypeError(f"'{self._tuber_objname}' object is not a container")
 
         if name in self._item_methods:
             raise AttributeError("Use tuber_call for method attributes")
 
-        if isinstance(self._items, list):
-            return [getattr(v, name) for v in self._items]
-        return {k: getattr(v, name) for k, v in self._items.items()}
+        if keys is None:
+            if isinstance(self._items, list):
+                keys = range(len(self._items))
+            else:
+                keys = self._items.keys()
+        items = [self._items[k] for k in keys]
 
-    def tuber_call(self, method: str, *args, **kwargs):
-        """If object is a container, call the requested method on all items.
-        Returns an identically keyed container of results for all objects."""
-
-        if not self.is_container:
-            raise TypeError(f"'{self._tuber_objname}' object is not a container")
-
-        if method not in self._item_methods:
-            raise AttributeError("Use tuber_get for property attributes")
-
-        islist = isinstance(self._items, list)
-        keys = range(len(self._items)) if islist else self._items.keys()
-
-        with self.tuber_context() as ctx:
-            for k in keys:
-                getattr(ctx[k], method)(*args, **kwargs)
-            results = ctx()
-
-        if not islist:
-            results = {k: v for k, v in zip(keys, results)}
-        return results
+        return [getattr(v, name) for v in self._items]
 
     def __len__(self):
         try:
@@ -649,28 +637,6 @@ class TuberObject(SimpleTuberObject):
             return results[0]
 
         return tuber_wrapper(invoke, meta)
-
-    async def tuber_call(self, method: str, *args, **kwargs):
-        """If object is a container, call the requested method on all items.
-        Returns an identically keyed container for all objects in the set."""
-
-        if not self.is_container:
-            raise TypeError(f"'{self._tuber_objname}' object is not a container")
-
-        if method not in self._item_methods:
-            raise AttributeError("Use tuber_get for property attributes")
-
-        islist = isinstance(self._items, list)
-        keys = range(len(self._items)) if islist else self._items.keys()
-
-        async with self.tuber_context() as ctx:
-            for k in keys:
-                getattr(ctx[k], method)(*args, **kwargs)
-            results = await ctx()
-
-        if not islist:
-            results = {k: v for k, v in zip(keys, results)}
-        return results
 
 
 # vim: sts=4 ts=4 sw=4 tw=78 smarttab expandtab

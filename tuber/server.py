@@ -58,9 +58,6 @@ def resolve_object(obj, simple=False, only_attrs=None):
     properties: Static property attributes
     """
 
-    if not simple and isinstance(obj, TuberContainer):
-        return obj.resolve()
-
     objects = {}
     methods = {}
     props = {}
@@ -87,7 +84,13 @@ def resolve_object(obj, simple=False, only_attrs=None):
         methods = list(methods)
         props = list(props)
 
-    return dict(__doc__=inspect.getdoc(obj), objects=objects, methods=methods, properties=props)
+    out = dict(__doc__=inspect.getdoc(obj), objects=objects, methods=methods, properties=props)
+
+    # append metadata
+    if not simple and hasattr(obj, "tuber_meta"):
+        out.update(obj.tuber_meta())
+
+    return out
 
 
 class TuberContainer:
@@ -122,7 +125,23 @@ class TuberContainer:
 
         self.__data = data
 
-    def resolve(self):
+    def tuber_call(self, method, *args, **kwargs):
+        """Call a method on every container item.
+
+        Returns a list containing the result of the given method called on every
+        item in the container.  If the `keys` keyword is supplied, restrict the
+        method call to only the given set of container items.
+        """
+        keys = kwargs.pop("keys", None)
+        if keys is None:
+            if isinstance(self.__data, list):
+                keys = range(len(self.__data))
+            else:
+                keys = self.__data.keys()
+        data = [self.__data[k] for k in keys]
+        return [getattr(v, method)(*args, **kwargs) for v in data]
+
+    def tuber_meta(self):
         """
         Return a dict with descriptions of all items in the collection, with
         sufficient information to reconstruct the collection on the client side.

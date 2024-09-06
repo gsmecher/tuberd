@@ -224,7 +224,7 @@ def Failed(warnings=None, **kwargs):
 
 container_success = Succeeded(
     __doc__=TuberContainer.__doc__.strip(),
-    methods=["resolve"],
+    methods=["tuber_call", "tuber_meta"],
     objects=[],
     properties=[],
 )
@@ -899,5 +899,4 @@ async def test_tuberpy_container_properties(tuber_call, accept_types, simple):
         r2 = await r2
 
     assert len(r2) == len(mobjs)
-    assert list(r2.keys()) == list(mobjs.keys())
-    assert all([x == "expected return value" for x in r2.values()])
+    assert all([x == "expected return value" for x in r2])
