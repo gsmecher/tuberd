@@ -292,7 +292,8 @@ class Context(SimpleContext):
         raise NotImplementedError
 
     def _add_call(self, **request):
-        future = asyncio.Future()
+        loop = asyncio.get_running_loop()
+        future = loop.create_future()
         self.calls.append((request, future))
         return future
 
