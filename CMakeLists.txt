@@ -49,6 +49,10 @@ add_test(NAME test-orjson-fastpath
 	WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 	COMMAND tests/test.py --orjson)
 
+add_test(NAME test-doctests
+	WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+	COMMAND python3 -m pytest tuber --doctest-modules)
+
 set_tests_properties(test-native-json test-orjson-fastpath
 	PROPERTIES ENVIRONMENT "CMAKE_TEST=1;PATH=${CMAKE_BINARY_DIR}:$ENV{PATH};PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}")
 
