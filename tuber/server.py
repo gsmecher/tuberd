@@ -1,7 +1,7 @@
 import inspect
 import warnings
 import functools
-from .codecs import Codecs, TuberResult
+from .codecs import Codecs
 
 __all__ = ["TuberContainer", "run"]
 
