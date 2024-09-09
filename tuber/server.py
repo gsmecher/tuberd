@@ -206,23 +206,64 @@ def agetter(obj, attr, *items):
     return functools.reduce(lambda o, i: o[i], items, getattr(obj, attr))
 
 
-class TuberRegistry(TuberResult):
+class TuberRegistry:
     """
     Registry class.
     """
 
+    def __init__(self, registry: dict | None = None, **kwargs):
+        """
+        Construct a TuberRegistry containing object references (perhaps in a
+        hierarchy) for tuberd to expose across the network.
+
+        This can be done using a "registry" dictionary argument:
+
+            >>> class SomeClass: pass
+            >>> r = TuberRegistry({"Class": SomeClass()})
+            >>> r["Class"]
+            <tuber.server.SomeClass object ...>
+
+        ...or using keyword arguments:
+
+            >>> r = TuberRegistry(Class=SomeClass())
+            >>> r["Class"]
+            <tuber.server.SomeClass object ...>
+
+        The two approaches are equivalent.
+        """
+
+        if registry:
+            for k, v in registry.items():
+                setattr(self, k, v)
+
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+
+    def __iter__(self):
+        return iter(self.__dict__)
+
     def __getitem__(self, objname):
         """
-        Extract an object from the registry for the given name.  The object name
-        may be a simple string name for the registry entry, or a list path
-        specifying the attributes and/or items to access.  For example, the path
+        Extract an object from the registry for the given name.
 
-            ["Class", ("Attribute", 0)]
+        The object name may be a simple string name for the registry entry, or
+        a list path specifying the attributes and/or items to access.  For
+        example, the trivial registry:
 
-        results in the object
+            >>> class SomeObject: LIST = [1, 2, 3, 4]
+            >>> r = TuberRegistry(Class=SomeObject())
 
-            registry["Class"].Attribute[0]
+        ...can be navigated as follows:
+
+            >>> r.Class.LIST[0]
+            1
+
+        ...equivalently
+
+            >>> r['Class', ('LIST', 0)]
+            1
         """
+
         try:
             # simple object
             if isinstance(objname, str):
