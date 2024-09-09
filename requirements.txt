@@ -2,6 +2,7 @@ numpy
 orjson
 pytest
 requests
+requests-futures
 aiohttp
 pytest-asyncio
 cbor2
