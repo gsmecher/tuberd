@@ -4,6 +4,7 @@ Tuber object interface
 
 from __future__ import annotations
 import asyncio
+import concurrent
 import textwrap
 import types
 import warnings
@@ -142,7 +143,9 @@ class SimpleContext:
             self()
 
     def _add_call(self, **request):
-        self.calls.append(request)
+        future = concurrent.futures.Future()
+        self.calls.append((request, future))
+        return future
 
     def __getattr__(self, name):
         if attribute_blacklisted(name):
@@ -192,26 +195,46 @@ class SimpleContext:
 
         # An empty Context returns an empty list of calls
         if not self.calls:
-            return []
+            return
 
-        calls = list(self.calls)
-        self.calls.clear()
+        calls = []
+        futures = []
+        while self.calls:
+            (c, f) = self.calls.pop(0)
 
-        import requests
+            calls.append(c)
+            futures.append(f)
+
+        if not hasattr(self.obj, "_tuber_session"):
+            # session object should persist beyond the lifetime of the context,
+            # akin to the asyncio event loop
+            from requests_futures.sessions import FuturesSession
+
+            self.obj._tuber_session = FuturesSession()
+
+        cs = self.obj._tuber_session
 
         # Declare the media types we want to allow getting back
         headers = {"Accept": ", ".join(self.accept_types)}
         if continue_on_error:
             headers["X-Tuber-Options"] = "continue-on-error"
+
         # Create a HTTP request to complete the call.
-        return requests.post(self.uri, json=calls, headers=headers)
+        # Returns a Future whose result has been processed by the response hook.
+        return cs.post(self.uri, json=calls, headers=headers, hooks={"response": self._response_hook(futures)})
 
-    def receive(self, response: "requests.Response", continue_on_error: bool = False):
+    def _response_hook(self, futures: list["concurrent.futures.Future"]):
+        """Hook function for parsing a response from the server into a list of futures for each context call"""
+
+        def hook(r, *args, **kwargs):
+            results = self._receive(r, futures)
+            r.tuber_results = results
+            return r
+
+        return hook
+
+    def _receive(self, response: "requests.Response", futures: list["concurrent.futures.Future"]):
         """Parse response from a previously sent HTTP request."""
-
-        # An empty Context returns an empty list of calls
-        if response is None or response == []:
-            return []
 
         with response as resp:
             raw_out = resp.content
@@ -236,8 +259,7 @@ class SimpleContext:
             # best we can.
             raise TuberRemoteError(json_out.error.message)
 
-        results = []
-        for r in json_out:
+        for f, r in zip(futures, json_out):
             # Always emit warnings, if any occurred
             if hasattr(r, "warnings") and r.warnings:
                 for w in r.warnings:
@@ -245,24 +267,29 @@ class SimpleContext:
 
             # Resolve either a result or an error
             if hasattr(r, "error") and r.error:
-                exc = TuberRemoteError(getattr(r.error, "message", "Unknown error"))
-                if continue_on_error:
-                    results.append(exc)
+                if hasattr(r.error, "message"):
+                    f.set_exception(TuberRemoteError(r.error.message))
                 else:
-                    raise exc
-            elif hasattr(r, "result"):
-                results.append(r.result)
+                    f.set_exception(TuberRemoteError("Unknown error"))
             else:
-                raise TuberError("Result has no 'result' attribute")
+                if hasattr(r, "result"):
+                    f.set_result(r.result)
+                else:
+                    f.set_exception(TuberError("Result has no 'result' attribute"))
 
         # Return a list of results
-        return results
+        return [f.result() for f in futures]
+
+    def receive(self, response: "concurrent.futures.Future"):
+        """Wait for a response from a previously sent HTTP request."""
+        if response is None:
+            return []
+        return response.result().tuber_results
 
     def __call__(self, continue_on_error: bool = False):
-        """Break off a set of calls and return them for execution."""
-
+        """Wait for any pending calls to complete and return the results from the server"""
         resp = self.send(continue_on_error=continue_on_error)
-        return self.receive(resp, continue_on_error=continue_on_error)
+        return self.receive(resp)
 
 
 class Context(SimpleContext):
@@ -478,9 +505,8 @@ class SimpleTuberObject:
             def invoke_wrapper(name, props):
                 def invoke(self, *args, **kwargs):
                     with self.tuber_context() as ctx:
-                        getattr(ctx, name)(*args, **kwargs)
-                        results = ctx()
-                    return results[0]
+                        r = getattr(ctx, name)(*args, **kwargs)
+                    return r.result()
 
                 return tuber_wrapper(invoke, props)
 
