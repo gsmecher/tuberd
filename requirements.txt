@@ -1,8 +1,9 @@
+aiohttp
+cbor2
+jsonschema
 numpy
 orjson
 pytest
+pytest-asyncio
 requests
 requests-futures
-aiohttp
-pytest-asyncio
-cbor2
