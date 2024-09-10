@@ -10,6 +10,7 @@ import subprocess
 import sys
 import threading
 import urllib
+import warnings
 
 from tuber import schema, codecs
 
@@ -86,7 +87,9 @@ def tuberd(tuberd_noproxy, proxy_uri, tuberd_uri):
                 # validate request to server
                 request_obj = json.loads(request_data)
                 try:
-                    jsonschema.validate(request_obj, schema.request)
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        jsonschema.validate(request_obj, schema.request)
                 except jsonschema.ValidationError as e:
                     print(e)
                     self.send_response(500)
@@ -114,7 +117,9 @@ def tuberd(tuberd_noproxy, proxy_uri, tuberd_uri):
                     raise RuntimeError(f"Unexpected content-type: {response_type}")
 
                 try:
-                    jsonschema.validate(response_obj, schema.response)
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        jsonschema.validate(response_obj, schema.response)
                 except jsonschema.ValidationError as e:
                     print(e)
                     self.send_response(500)
