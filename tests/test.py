@@ -391,9 +391,9 @@ async def test_tuberpy_async_context(tuber_call, accept_types, simple, proxy_uri
 
     if simple:
         with s.tuber_context() as ctx:
-            ctx.increment([1, 2, 3])
-            ctx.increment([2, 3, 4])
-            r1, r2 = ctx()
+            r1 = ctx.increment([1, 2, 3])
+            r2 = ctx.increment([2, 3, 4])
+        r1, r2 = [x.result() for x in [r1, r2]]
     else:
         async with s.tuber_context() as ctx:
             r1 = ctx.increment([1, 2, 3])
@@ -414,9 +414,10 @@ async def test_tuberpy_async_context_with_kwargs(tuber_call, accept_types, simpl
 
     if simple:
         with s.tuber_context(x=[1, 2, 3]) as ctx:
-            ctx.increment()
-            ctx.increment()
-            r1, r2 = ctx()
+            r1 = ctx.increment()
+            r2 = ctx.increment()
+
+        r1, r2 = [x.result() for x in [r1, r2]]
     else:
         async with s.tuber_context(x=[1, 2, 3]) as ctx:
             r1 = ctx.increment()
@@ -438,9 +439,9 @@ async def test_tuberpy_async_context_with_exception(tuber_call, accept_types, si
     with pytest.raises(tuber.TuberRemoteError):
         if simple:
             with s.tuber_context() as ctx:
-                ctx.increment([1, 2, 3])
-                ctx.increment(4)
-                ctx.increment([5, 6, 6])
+                r1 = ctx.increment([1, 2, 3])
+                r2 = ctx.increment(4)
+                r3 = ctx.increment([5, 6, 6])
         else:
             async with s.tuber_context() as ctx:
                 r1 = ctx.increment([1, 2, 3])  # fine
@@ -449,20 +450,26 @@ async def test_tuberpy_async_context_with_exception(tuber_call, accept_types, si
 
         # execution happens when ctx falls out of scope - exception raised
 
-    if simple:
-        return
-
     # the first call should have succeeded
-    await r1
+    if simple:
+        r1.result()
+    else:
+        await r1
 
     # the second call generated the exception
     with pytest.raises(tuber.TuberRemoteError):
-        await r2
+        if simple:
+            r2.result()
+        else:
+            await r2
 
     # the third call should not have been executed (propagated here as an
     # exception too)
     with pytest.raises(tuber.TuberRemoteError):
-        await r3
+        if simple:
+            r3.result()
+        else:
+            await r3
 
 
 @pytest.mark.parametrize("simple", [True, False])
@@ -510,23 +517,31 @@ async def test_tuberpy_async_context_with_unserializable(tuber_call, accept_type
 
     if simple:
         with s.tuber_context() as ctx:
-            ctx.increment([1, 2, 3])  # fine
-            ctx.unserializable()
-            ctx.increment([5, 6, 6])  # shouldn't execute
-        return
+            r1 = ctx.increment([1, 2, 3])  # fine
+            r2 = ctx.unserializable()
+            r3 = ctx.increment([5, 6, 6])  # shouldn't execute
 
     async with s.tuber_context() as ctx:
         r1 = ctx.increment([1, 2, 3])  # fine
         r2 = ctx.unserializable()
         r3 = ctx.increment([5, 6, 6])  # shouldn't execute
 
-    await r1
+    if simple:
+        r1.result()
+    else:
+        await r1
 
     with pytest.raises(tuber.TuberRemoteError):
-        await r2
+        if simple:
+            r2.result()
+        else:
+            await r2
 
     with pytest.raises(tuber.TuberRemoteError):
-        await r3
+        if simple:
+            r3.result()
+        else:
+            await r3
 
 
 @pytest.mark.parametrize("simple", [True, False])
@@ -632,14 +647,23 @@ async def test_tuberpy_continue_errors(tuber_call, accept_types, simple, continu
     with pytest.warns(match="This is a warning"):
         if simple:
             with s.tuber_context() as ctx:
-                ctx.Wrapper.increment([1, 2, 3])  # fine
-                ctx.Warnings.single_warning("This is a warning", error=True)
-                ctx.Wrapper.increment([5, 6, 6])  # should still execute
+                r1 = ctx.Wrapper.increment([1, 2, 3])  # fine
+                r2 = ctx.Warnings.single_warning("This is a warning", error=True)
+                r3 = ctx.Wrapper.increment([5, 6, 6])  # should still execute
                 if not continue_on_error:
                     with pytest.raises(tuber.TuberRemoteError):
                         ctx()
+                    with pytest.raises(tuber.TuberRemoteError):
+                        r3.result()
                 else:
-                    r1, r2, r3 = ctx(continue_on_error=True)
+                    try:
+                        ctx(continue_on_error=True)
+                    except tuber.TuberRemoteError:
+                        pass
+                    with pytest.raises(tuber.TuberRemoteError):
+                        r2.result()
+                    r1 = r1.result()
+                    r3 = r3.result()
         else:
             async with s.tuber_context() as ctx:
                 r1 = ctx.Wrapper.increment([1, 2, 3])  # fine
@@ -664,6 +688,4 @@ async def test_tuberpy_continue_errors(tuber_call, accept_types, simple, continu
         return
 
     assert r1 == [2, 3, 4]
-    if simple:
-        assert isinstance(r2, tuber.TuberRemoteError)  # this is an error response returned as a result
     assert r3 == [6, 7, 7]
