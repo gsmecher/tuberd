@@ -19,7 +19,6 @@ try:
 except ImportError:
     from tuber.tests import test_module as tm
 
-from tuber import codecs
 
 # REGISTRY DEFINITIONS
 #
@@ -359,7 +358,7 @@ async def tuber_result(res):
 @pytest.mark.parametrize("simple", [True, False])
 @pytest.mark.parametrize("accept_types", ACCEPT_TYPES)
 @pytest.mark.asyncio
-async def test_tuberpy_hello(tuber_call, accept_types, simple, proxy_uri):
+async def test_tuberpy_hello(accept_types, simple, proxy_uri):
     s = await resolve("Wrapper", accept_types, simple, uri=proxy_uri)
     x = await tuber_result(s.increment([1, 2, 3, 4, 5]))
     assert x == [2, 3, 4, 5, 6]
