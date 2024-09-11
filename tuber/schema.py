@@ -28,6 +28,7 @@ request_single = {
         },
         "property": {"type": "string"},
         "method": {"type": "string"},
+        "resolve": {"type": "boolean"},
     },
     "additionalProperties": False,
 }

@@ -704,16 +704,10 @@ async def test_tuberpy_containers(accept_types, simple, proxy_uri):
     assert list(s.ObjectWithContainerProperties.method_objects.keys()) == ["a", "b"]
     assert s.ObjectWithContainerProperties.property_objects[0].PROPERTY == "expected property value"
 
-    r1 = s.ObjectList[0].method_objects["a"].method()
-    r2 = s.ObjectListList[1][0].method_objects["a"].method()
-    r3 = s.ObjectDict["a"].method_objects["a"].method()
-    r4 = s.ObjectWithContainerProperties.method_objects["b"].method()
-
-    if not simple:
-        r1 = await r1
-        r2 = await r2
-        r3 = await r3
-        r4 = await r4
+    r1 = await tuber_result(s.ObjectList[0].method_objects["a"].method())
+    r2 = await tuber_result(s.ObjectListList[1][0].method_objects["a"].method())
+    r3 = await tuber_result(s.ObjectDict["a"].method_objects["a"].method())
+    r4 = await tuber_result(s.ObjectWithContainerProperties.method_objects["b"].method())
 
     assert all([x == "expected return value" for x in [r1, r2, r3, r4]])
 
@@ -725,19 +719,11 @@ async def test_tuberpy_container_context(accept_types, simple, proxy_uri):
     """Ensure containers work in contexts"""
     s = await resolve(accept_types=accept_types, simple=simple, uri=proxy_uri)
 
-    if simple:
-        with s.tuber_context() as ctx:
-            for idx, obj in enumerate(s.ObjectList):
-                for k in obj.method_objects.keys():
-                    ctx.ObjectList[idx].method_objects[k].method()
-            r1 = ctx()
-
-    else:
-        async with s.tuber_context() as ctx:
-            for idx, obj in enumerate(s.ObjectList):
-                for k in obj.method_objects.keys():
-                    ctx.ObjectList[idx].method_objects[k].method()
-            r1 = await ctx()
+    async with tuber_context(s) as ctx:
+        for idx, obj in enumerate(s.ObjectList):
+            for k in obj.method_objects.keys():
+                ctx.ObjectList[idx].method_objects[k].method()
+        r1 = await ctx()
 
     assert all([x == "expected return value" for x in r1])
 
@@ -749,21 +735,14 @@ async def test_tuberpy_container_property_context(accept_types, simple, proxy_ur
     """Ensure methods of container objects work in contexts"""
     s = await resolve("ObjectWithContainerProperties", accept_types=accept_types, simple=simple, uri=proxy_uri)
 
-    r1 = s.method_objects["a"].method()
-    if not simple:
-        r1 = await r1
+    r1 = await tuber_result(s.method_objects["a"].method())
     assert r1 == "expected return value"
 
     assert s.property_objects[0].PROPERTY == "expected property value"
 
-    if simple:
-        with s.tuber_context() as ctx:
-            ctx.method_objects["a"].method()
-            r2 = ctx()[0]
-    else:
-        async with s.tuber_context() as ctx:
-            r2 = ctx.method_objects["a"].method()
-        r2 = await r2
+    async with tuber_context(s) as ctx:
+        r2 = ctx.method_objects["a"].method()
+    r2 = await tuber_result(r2)
 
     assert r2 == "expected return value"
 
@@ -781,9 +760,7 @@ async def test_tuberpy_container_properties(accept_types, simple, proxy_uri):
     assert all([x == "expected property value" for x in r1])
 
     mobjs = s.ObjectWithContainerProperties.method_objects
-    r2 = mobjs.tuber_call("method")
-    if not simple:
-        r2 = await r2
+    r2 = await tuber_result(mobjs.tuber_call("method"))
 
     assert len(r2) == len(mobjs)
     assert all([x == "expected return value" for x in r2])

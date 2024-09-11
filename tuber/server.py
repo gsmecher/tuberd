@@ -2,6 +2,7 @@ from __future__ import annotations
 
 
 import inspect
+import os
 import warnings
 import functools
 from .codecs import Codecs
@@ -577,7 +578,6 @@ def main():
     """
 
     import argparse as ap
-    import os
 
     P = ap.ArgumentParser(description="Tuber server")
     P.add_argument(
