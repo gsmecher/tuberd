@@ -181,7 +181,6 @@ class TuberContainer:
         return self.__data[item]
 
 
-
 class TuberRegistry:
     """
     Registry class.
