@@ -392,7 +392,7 @@ class RequestHandler:
     Tuber server request handler.
     """
 
-    def __init__(self, registry, json_module="json", default_format="application/json"):
+    def __init__(self, registry, json_module="json", default_format="application/json", validate=False):
         """
         Arguments
         ---------
@@ -402,6 +402,8 @@ class RequestHandler:
             Python package to use for encoding and decoding JSON requests.
         default_format : str
             Default encoding format to assume for requests and responses.
+        validate : bool
+            If True, validate incoming and outgoing packets with jsonschema.
         """
         # ensure registry is a dictionary
         assert isinstance(registry, dict), "Invalid registry"
@@ -422,6 +424,23 @@ class RequestHandler:
 
         assert default_format in self.codecs, f"Missing codec for {default_format}"
         self.default_format = default_format
+        self._validate = validate
+
+    def validate(self, data, schema_type):
+        """
+        Validate data packet using jsonschema.
+
+        schema_type must be a valid attribute of the tuber.schema module.
+        """
+        if not self._validate:
+            return
+
+        import jsonschema
+        from . import schema
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            jsonschema.validate(data, getattr(schema, schema_type))
 
     def encode(self, data, fmt=None):
         """
@@ -431,6 +450,10 @@ class RequestHandler:
         """
         if fmt is None:
             fmt = self.default_format
+        try:
+            self.validate(data, "response")
+        except Exception as e:
+            data = error_response(e)
         return fmt, self.codecs[fmt].encode(data)
 
     def decode(self, data, fmt=None):
@@ -441,7 +464,9 @@ class RequestHandler:
         """
         if fmt is None:
             fmt = self.default_format
-        return self.codecs[fmt].decode(data)
+        data = self.codecs[fmt].decode(data)
+        self.validate(data, "request")
+        return data
 
     def handle(self, request, headers):
         """
@@ -531,7 +556,7 @@ class RequestHandler:
         return self.handle(*args, **kwargs)
 
 
-def run(registry, json_module="json", port=80, webroot="/var/www/", max_age=3600, verbose=0):
+def run(registry, json_module="json", port=80, webroot="/var/www/", max_age=3600, validate=False, verbose=0):
     """
     Run tuber server with the given registry.
 
@@ -547,6 +572,8 @@ def run(registry, json_module="json", port=80, webroot="/var/www/", max_age=3600
         Location to serve static content
     max_age : int
         Maximum cache residency for static (file) assets
+    validate : bool
+        If True, validate incoming and outgoing data packets using jsonschema
     verbose : int
         Verbosity level (0-2)
     """
@@ -560,7 +587,7 @@ def run(registry, json_module="json", port=80, webroot="/var/www/", max_age=3600
         from ._tuber_runtime import run_server
 
     # prepare handler
-    handler = RequestHandler(registry, json_module)
+    handler = RequestHandler(registry, json_module, validate=validate)
 
     # run
     run_server(
@@ -601,6 +628,9 @@ def main():
         default=3600,
         type=int,
         help="Maximum cache residency for static (file) assets",
+    )
+    P.add_argument(
+        "--validate", action="store_true", help="Validate incoming and outgoing data packets using jsonschema"
     )
     P.add_argument("-v", "--verbose", type=int, default=0)
     args = P.parse_args()
