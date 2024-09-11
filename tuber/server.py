@@ -5,7 +5,9 @@ import inspect
 import os
 import warnings
 import functools
+
 from .codecs import Codecs
+from . import schema
 
 __all__ = ["TuberRegistry", "TuberContainer", "run"]
 
@@ -412,11 +414,10 @@ class RequestHandler:
             return
 
         import jsonschema
-        from . import schema
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            jsonschema.validate(data, getattr(schema, schema_type))
+            jsonschema.validate(data, schema_type)
 
     def encode(self, data, fmt=None):
         """
@@ -427,7 +428,7 @@ class RequestHandler:
         if fmt is None:
             fmt = self.default_format
         try:
-            self.validate(data, "response")
+            self.validate(data, schema.response)
         except Exception as e:
             data = error_response(e)
         return fmt, self.codecs[fmt].encode(data)
@@ -441,7 +442,7 @@ class RequestHandler:
         if fmt is None:
             fmt = self.default_format
         data = self.codecs[fmt].decode(data)
-        self.validate(data, "request")
+        self.validate(data, schema.request)
         return data
 
     def handle(self, request, headers):

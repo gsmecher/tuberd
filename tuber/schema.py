@@ -1,12 +1,11 @@
 """
 JSON Schemas for tuber requests and responses.
 
-These schemas are NOT verified in deployment - they are only used in test code,
-where a proxy server sits between the client-side tests and server and ensures
-conformance along the way.
-
-There is a sneaky side-effect - any tests that use this validation layer, by
-construction, do not test invalid requests.
+These schemas are only verified in deployment when the "--validate" flag is set
+on tuberd. This is not ordinarily true in deployment. Hence, jsonquery is a
+belt-and-braces way to ensure the server and client code are conformant to a
+particular specification. It is not meant to protect against ill-crafted or
+malicious requests.
 """
 
 """
