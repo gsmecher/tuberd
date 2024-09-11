@@ -181,9 +181,6 @@ class TuberContainer:
         return self.__data[item]
 
 
-def agetter(obj, attr, *items):
-    return functools.reduce(lambda o, i: o[i], items, getattr(obj, attr))
-
 
 class TuberRegistry:
     """
@@ -250,6 +247,10 @@ class TuberRegistry:
 
             # object traversal
             objname = [[x] if isinstance(x, str) else x for x in objname]
+
+            def agetter(obj, attr, *items):
+                return functools.reduce(lambda o, i: o[i], items, getattr(obj, attr))
+
             return functools.reduce(lambda obj, x: agetter(obj, *x), objname, self)
 
         except Exception as e:
