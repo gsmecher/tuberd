@@ -54,6 +54,18 @@ response_warnings = {
     },
 }
 
+response_metadata = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "properties": {
+        "result": {
+            # any JSON type allowed
+        },
+    },
+    "required": ["result"],
+    "additionalProperties": False,
+}
+
 response_valid_single = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",

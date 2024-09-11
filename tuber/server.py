@@ -256,112 +256,6 @@ class TuberRegistry:
             raise e.__class__(f"{str(e)} (Invalid object name '{objname}')")
 
 
-def describe(registry, request):
-    """
-    Tuber slow path
-
-    This is invoked with a "request" object that does _not_ contain "object"
-    and "method" keys, which would indicate a RPC operation.
-
-    Instead, we are requesting one of the following:
-
-    - A registry descriptor (no "object" or "method" or "property")
-    - An object descriptor ("object" but no "method" or "property")
-    - An object attribute descriptor ("object" and a "property" corresponding to an object)
-    - A method descriptor ("object" and a "property" corresponding to a method)
-    - A property descriptor ("object" and a "property" that is static data)
-
-    Since these are all cached on the client side, we are more concerned about
-    correctness and robustness than performance here.
-    """
-
-    objname = request["object"] if "object" in request else None
-    methodname = request["method"] if "method" in request else None
-    propertyname = request["property"] if "property" in request else None
-    resolve = request["resolve"] if "resolve" in request else False
-
-    if not objname and not methodname and not propertyname:
-        # registry metadata
-        if resolve:
-            objects = {obj: resolve_object(registry[obj]) for obj in registry}
-        else:
-            objects = list(registry)
-        return result_response(objects=objects)
-
-    obj = registry[objname]
-
-    if not methodname and not propertyname:
-        # Object metadata.
-        return result_response(**resolve_object(obj, recursive=resolve))
-
-    if propertyname:
-        # Sanity check
-        if not hasattr(obj, propertyname):
-            raise AttributeError(f"'{objname}' object has no attribute '{propertyname}'")
-
-        # Returning a method description or property evaluation
-        attr = getattr(obj, propertyname)
-
-        # Complex case: return a description of an object
-        if getattr(attr, "__tuber_object__", False):
-            return result_response(**resolve_object(attr, recursive=resolve))
-
-        # Simple case: just a property evaluation
-        if not callable(attr):
-            return result_response(attr)
-
-        # Complex case: return a description of a method
-        return result_response(**resolve_method(attr))
-
-    raise ValueError(f"Invalid request ({request})")
-
-
-def invoke(registry, request):
-    """
-    Tuber command path
-
-    This is invoked with a "request" object with any of the following combinations of keys:
-
-    - A registry descriptor (no "object" or "method" or "property")
-    - An object descriptor ("object" but no "method" or "property")
-    - A method descriptor ("object" and a "property" corresponding to a method)
-    - A property descriptor ("object" and a "property" that is static data)
-    - A method call ("object" and "method", with optional "args" and/or "kwargs")
-    """
-
-    try:
-        if not ("object" in request and "method" in request):
-            return describe(registry, request)
-
-        objname = request["object"]
-        obj = registry[objname]
-
-        methodname = request["method"]
-        method = getattr(obj, methodname)
-
-        args = request.get("args", [])
-        if not isinstance(args, list):
-            raise TypeError(f"Argument 'args' for method {objname}.{methodname} must be a list.")
-
-        kwargs = request.get("kwargs", {})
-        if not isinstance(kwargs, dict):
-            raise TypeError(f"Argument 'kwargs' for method {objname}.{methodname} must be a dict.")
-
-    except Exception as e:
-        return error_response(e)
-
-    with warnings.catch_warnings(record=True) as wlist:
-        try:
-            response = result_response(method(*args, **kwargs))
-        except Exception as e:
-            response = error_response(e)
-
-        if len(wlist):
-            response["warnings"] = [str(w.message) for w in wlist]
-
-    return response
-
-
 class RequestHandler:
     """
     Tuber server request handler.
@@ -500,7 +394,7 @@ class RequestHandler:
 
             # parse single request
             if isinstance(request_obj, dict):
-                result = invoke(self.registry, request_obj)
+                result = self.invoke(request_obj)
                 return encode(result)
 
             if not isinstance(request_obj, list):
@@ -519,7 +413,7 @@ class RequestHandler:
                     results[i] = error_response("Something went wrong in a preceding call")
                     continue
 
-                results[i] = invoke(self.registry, r)
+                results[i] = self.invoke(r)
 
                 if "error" in results[i] and not continue_on_error:
                     early_bail = True
@@ -528,6 +422,112 @@ class RequestHandler:
 
         except Exception as e:
             return encode(error_response(e))
+
+    def invoke(self, request):
+        """
+        Tuber command path
+
+        This is invoked with a "request" object with any of the following combinations of keys:
+
+        - A registry descriptor (no "object" or "method" or "property")
+        - An object descriptor ("object" but no "method" or "property")
+        - A method descriptor ("object" and a "property" corresponding to a method)
+        - A property descriptor ("object" and a "property" that is static data)
+        - A method call ("object" and "method", with optional "args" and/or "kwargs")
+        """
+
+        try:
+            if not ("object" in request and "method" in request):
+                description = self.describe(request)
+                self.validate(description, schema.response_metadata)
+                return description
+
+            objname = request["object"]
+            obj = self.registry[objname]
+
+            methodname = request["method"]
+            method = getattr(obj, methodname)
+
+            args = request.get("args", [])
+            if not isinstance(args, list):
+                raise TypeError(f"Argument 'args' for method {objname}.{methodname} must be a list.")
+
+            kwargs = request.get("kwargs", {})
+            if not isinstance(kwargs, dict):
+                raise TypeError(f"Argument 'kwargs' for method {objname}.{methodname} must be a dict.")
+
+        except Exception as e:
+            return error_response(e)
+
+        with warnings.catch_warnings(record=True) as wlist:
+            try:
+                response = result_response(method(*args, **kwargs))
+            except Exception as e:
+                response = error_response(e)
+
+            if len(wlist):
+                response["warnings"] = [str(w.message) for w in wlist]
+
+        return response
+
+    def describe(self, request):
+        """
+        Tuber slow path
+
+        This is invoked with a "request" object that does _not_ contain "object"
+        and "method" keys, which would indicate a RPC operation.
+
+        Instead, we are requesting one of the following:
+
+        - A registry descriptor (no "object" or "method" or "property")
+        - An object descriptor ("object" but no "method" or "property")
+        - An object attribute descriptor ("object" and a "property" corresponding to an object)
+        - A method descriptor ("object" and a "property" corresponding to a method)
+        - A property descriptor ("object" and a "property" that is static data)
+
+        Since these are all cached on the client side, we are more concerned about
+        correctness and robustness than performance here.
+        """
+
+        objname = request["object"] if "object" in request else None
+        methodname = request["method"] if "method" in request else None
+        propertyname = request["property"] if "property" in request else None
+        resolve = request["resolve"] if "resolve" in request else False
+
+        if not objname and not methodname and not propertyname:
+            # registry metadata
+            if resolve:
+                objects = {obj: resolve_object(self.registry[obj]) for obj in self.registry}
+            else:
+                objects = list(self.registry)
+            return result_response(objects=objects)
+
+        obj = self.registry[objname]
+
+        if not methodname and not propertyname:
+            # Object metadata.
+            return result_response(**resolve_object(obj, recursive=resolve))
+
+        if propertyname:
+            # Sanity check
+            if not hasattr(obj, propertyname):
+                raise AttributeError(f"'{objname}' object has no attribute '{propertyname}'")
+
+            # Returning a method description or property evaluation
+            attr = getattr(obj, propertyname)
+
+            # Complex case: return a description of an object
+            if getattr(attr, "__tuber_object__", False):
+                return result_response(**resolve_object(attr, recursive=resolve))
+
+            # Simple case: just a property evaluation
+            if not callable(attr):
+                return result_response(attr)
+
+            # Complex case: return a description of a method
+            return result_response(**resolve_method(attr))
+
+        raise ValueError(f"Invalid request ({request})")
 
     def __call__(self, *args, **kwargs):
         return self.handle(*args, **kwargs)
