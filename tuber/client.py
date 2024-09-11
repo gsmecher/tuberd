@@ -487,9 +487,6 @@ class SimpleTuberObject:
         if not self.is_container:
             raise TypeError(f"'{self._tuber_objname}' object is not a container")
 
-        if name in self._item_methods:
-            raise AttributeError("Use tuber_call for method attributes")
-
         if keys is None:
             if isinstance(self._items, list):
                 keys = range(len(self._items))
@@ -600,25 +597,19 @@ class SimpleTuberObject:
             setattr(self, propname, getattr(meta.properties, propname))
 
         # container of objects
-        if hasattr(meta, "container"):
-            cmeta = meta.container
-
-            keys = getattr(cmeta, "keys", None)
+        if hasattr(meta, "values"):
+            keys = getattr(meta, "keys", None)
             if keys is None:
                 islist = True
-                keys = range(len(cmeta.values))
-                items = [None] * len(cmeta.values)
+                keys = range(len(meta.values))
+                items = [None] * len(meta.values)
             else:
                 islist = False
                 items = dict()
 
-            for k, objmeta in zip(keys, cmeta.values):
-                objmeta.__doc__ = cmeta.item_doc
-                objmeta.methods = cmeta.item_methods
-                obj = self._resolve_object(item=k, meta=objmeta)
-                items[k] = obj
+            for k, objmeta in zip(keys, meta.values):
+                items[k] = self._resolve_object(item=k, meta=objmeta)
 
-            self._item_methods = cmeta.item_methods
             self._items = items
 
             if not islist:

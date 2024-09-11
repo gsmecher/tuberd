@@ -51,12 +51,11 @@ def resolve_method(method):
     return dict(__doc__=doc, __signature__=sig)
 
 
-def resolve_object(obj, recursive=True, only_attrs=None):
+def resolve_object(obj, recursive=True):
     """
     Return a dictionary of all valid object attributes classified by type.
     If recursive=True, return dictionaries with complete descriptions of all
     child attributes, recursing through the entire object tree.
-    If only_attrs is given, only include these attributes in the output set.
 
     objects: TuberContainer objects that are to be further resolved
     methods: Callable attributes
@@ -72,12 +71,9 @@ def resolve_object(obj, recursive=True, only_attrs=None):
         props = []
     clsname = obj.__class__.__name__
 
-    if only_attrs is None:
-        only_attrs = dir(obj)
-
     out = dict(__doc__=inspect.getdoc(obj), methods=methods, properties=props)
 
-    for d in only_attrs:
+    for d in dir(obj):
         # Don't export dunder methods or attributes - this avoids exporting
         # Python internals on the server side to any client.
         if d.startswith("__") or d.startswith(f"_{clsname}__"):
@@ -112,7 +108,7 @@ def resolve_object(obj, recursive=True, only_attrs=None):
 
 
 class TuberContainer:
-    """Container for grouping objects of the same type"""
+    """Container for grouping objects"""
 
     __tuber_object__ = True
 
@@ -121,7 +117,7 @@ class TuberContainer:
         Arguments
         ---------
         data : list or dict
-            All values in the collection are assumed to have the same set of methods and properties.
+            A list or dictionary of objects
         """
         if isinstance(data, list):
             if not data:
@@ -133,13 +129,6 @@ class TuberContainer:
             values = list(data.values())
         else:
             raise TypeError("Invalid container type")
-
-        # Ensure that all objects are the same type
-        tp = type(values[0])
-        for v in values:
-            # check for exact match
-            if type(v) != tp:
-                raise TypeError(f"All entries must be of type {tp}")
 
         self.__data = data
 
@@ -171,27 +160,11 @@ class TuberContainer:
             keys = list(self.__data.keys())
             values = self.__data.values()
 
-        item_attrs = None
-        doc = None
-        methods = None
-        out_values = []
-        for v in values:
-            res = resolve_object(v, only_attrs=item_attrs)
-            if "container" not in res:
-                if item_attrs is None:
-                    doc = res.pop("__doc__", None)
-                    methods = res.pop("methods", {})
-                    item_attrs = list(res.get("objects", [])) + list(res.get("properties", []))
-                else:
-                    res.pop("__doc__", None)
-                    res.pop("methods", None)
-            out_values.append(res)
-
-        out = {"values": out_values, "item_doc": doc, "item_methods": methods}
+        out = {"values": [resolve_object(v) for v in values]}
         if keys is not None:
             out["keys"] = keys
 
-        return {"container": out}
+        return out
 
     def __getattr__(self, name):
         return getattr(self.__data, name)
@@ -292,7 +265,7 @@ def describe(registry, request):
 
     - A registry descriptor (no "object" or "method" or "property")
     - An object descriptor ("object" but no "method" or "property")
-    - A container descriptor ("object" and a "property" corresponding to a container)
+    - An object attribute descriptor ("object" and a "property" corresponding to an object)
     - A method descriptor ("object" and a "property" corresponding to a method)
     - A property descriptor ("object" and a "property" that is static data)
 
