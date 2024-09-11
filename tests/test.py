@@ -113,6 +113,7 @@ registry = {
     "ObjectListList": TuberContainer(
         [TuberContainer([ObjectWithContainerProperties()]), TuberContainer([ObjectWithContainerProperties])]
     ),
+    "Container": TuberContainer({"a": ObjectWithProperty(), "b": ObjectWithMethod()}),
     "Types": Types(),
     "NumPy": NumPy(),
     "Warnings": WarningsClass(),
@@ -670,13 +671,15 @@ async def test_tuberpy_containers(resolve):
     assert len(s.ObjectWithContainerProperties.property_objects) == 2
     assert list(s.ObjectWithContainerProperties.method_objects.keys()) == ["a", "b"]
     assert s.ObjectWithContainerProperties.property_objects[0].PROPERTY == "expected property value"
+    assert s.Container["a"].PROPERTY == "expected property value"
 
     r1 = await tuber_result(s.ObjectList[0].method_objects["a"].method())
     r2 = await tuber_result(s.ObjectListList[1][0].method_objects["a"].method())
     r3 = await tuber_result(s.ObjectDict["a"].method_objects["a"].method())
     r4 = await tuber_result(s.ObjectWithContainerProperties.method_objects["b"].method())
+    r5 = await tuber_result(s.Container["b"].method())
 
-    assert all([x == "expected return value" for x in [r1, r2, r3, r4]])
+    assert all([x == "expected return value" for x in [r1, r2, r3, r4, r5]])
 
 
 @pytest.mark.asyncio
