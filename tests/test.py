@@ -2,33 +2,24 @@
 
 import aiohttp
 import asyncio
+import cbor2
 import importlib
+import inspect
+import json
 import numpy as np
-import os
-import sys
-import pathlib
 import pytest
 import requests
-import subprocess
-import inspect
+import time
+import urllib
+import warnings
+import tuber
 
 try:
     import test_module as tm
 except ImportError:
     from tuber.tests import test_module as tm
-import tuber
-from tuber import codecs
+
 from tuber.server import TuberContainer
-import weakref
-import warnings
-import cbor2
-import json
-
-from requests.packages.urllib3.util.retry import Retry
-
-TUBERD_PORT = 8080
-TUBERD_HOSTNAME = f"localhost:{TUBERD_PORT}"
-TUBERD_URI = f"http://{TUBERD_HOSTNAME}/tuber"
 
 
 # REGISTRY DEFINITIONS
@@ -133,77 +124,9 @@ registry = {
 }
 
 
-@pytest.fixture(scope="session")
-def tuberd(pytestconfig):
-    """Spawn (and kill) a tuberd"""
-
-    if os.getenv("CMAKE_TEST"):
-        tuberd = [sys.executable, "-m", "tuber.server"]
-    else:
-        tuberd = ["tuberd"]
-
-    registry = __file__
-
-    argv = tuberd + [
-        f"-p{TUBERD_PORT}",
-        f"--registry={registry}",
-    ]
-
-    argv.extend(pytestconfig.getoption("tuberd_option"))
-
-    if pytestconfig.getoption("orjson"):
-        # If we can't import orjson here, it's presumably missing from the
-        # tuberd execution environment as well - in which case, we should skip
-        # the test.
-        pytest.importorskip("orjson")
-        argv.extend(["--json", "orjson"])
-
-    s = subprocess.Popen(argv)
-    yield s
-    s.terminate()
-
-
 #
 # Sanity Checks - Python -> JSON -> C++ -> Python and back again
 #
-
-
-# This fixture provides a much simpler, synchronous wrapper for functionality
-# normally provided by tuber.py.  It's coded directly - which makes it less
-# flexible, less performant, and easier to understand here.
-@pytest.fixture(scope="session", params=["json", "cbor"])
-def tuber_call(request, tuberd):
-    # Although the tuberd argument is not used here, it creates a dependency on
-    # the daemon so it's launched and terminated.
-
-    if request.param == "json":
-        accept = "application/json"
-        loads = json.loads
-    elif request.param == "cbor":
-        accept = "application/cbor"
-        loads = lambda data: cbor2.loads(data, tag_hook=codecs.cbor_tag_decode)
-
-    # The tuber daemon can take a little while to start (in particular, it
-    # sources this script as a registry) - rather than adding a magic sleep to
-    # the subprocess command, we teach the client interface to wait patiently.
-    adapter = requests.adapters.HTTPAdapter(max_retries=Retry(total=10, backoff_factor=1))
-    session = requests.Session()
-    session.mount(TUBERD_URI, adapter)
-
-    def tuber_call(json=None, **kwargs):
-        # The most explicit call style passes POST content via an explicit
-        # "json" parameter.  However, for convenience's sake, we also allow
-        # kwargs to supply a dict parameter since we often call with dicts and
-        # this results in a more readable code style.
-        return loads(
-            session.post(
-                TUBERD_URI,
-                json=kwargs if json is None else json,
-                headers={"Accept": accept},
-            ).content
-        )
-
-    yield tuber_call
 
 
 def Succeeded(args=None, warnings=None, **kwargs):
@@ -439,52 +362,86 @@ ACCEPT_TYPES = [
 ]
 
 
-async def resolve(objname=None, accept_types=None, simple=None):
+async def resolve(objname=None, accept_types=None, simple=None, uri=None):
+    assert uri
+    netloc = urllib.parse.urlparse(uri).netloc
+
     if simple:
-        return tuber.resolve_simple(TUBERD_HOSTNAME, objname, accept_types)
+        return tuber.resolve_simple(netloc, objname, accept_types)
     else:
-        return await tuber.resolve(TUBERD_HOSTNAME, objname, accept_types)
+        return await tuber.resolve(netloc, objname, accept_types)
+
+
+class AsyncSimpleContext:
+    def __init__(self, ctx):
+        self.ctx = ctx
+
+    async def __call__(self, **kwargs):
+        return self.ctx(**kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self.ctx, name)
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args, **kwargs):
+        self.ctx()
+
+
+def tuber_context(obj, **kwargs):
+    ctx = obj.tuber_context(**kwargs)
+    if inspect.iscoroutinefunction(ctx.__call__):
+        return ctx
+    return AsyncSimpleContext(ctx)
+
+
+async def tuber_result(res):
+    if inspect.isawaitable(res):
+        return await res
+    try:
+        return res.result()
+    except AttributeError:
+        return res
 
 
 @pytest.mark.parametrize("simple", [True, False])
 @pytest.mark.parametrize("accept_types", ACCEPT_TYPES)
 @pytest.mark.asyncio
-async def test_tuberpy_hello(tuber_call, accept_types, simple):
-    s = await resolve("Wrapper", accept_types, simple)
-    x = s.increment([1, 2, 3, 4, 5])
-    if not simple:
-        x = await x
+async def test_tuberpy_hello(accept_types, simple, proxy_uri):
+    s = await resolve("Wrapper", accept_types, simple, uri=proxy_uri)
+    x = await tuber_result(s.increment([1, 2, 3, 4, 5]))
     assert x == [2, 3, 4, 5, 6]
 
 
 @pytest.mark.parametrize("simple", [True, False])
 @pytest.mark.parametrize("accept_types", ACCEPT_TYPES)
 @pytest.mark.asyncio
-async def test_tuberpy_dir(tuber_call, accept_types, simple):
+async def test_tuberpy_dir(accept_types, simple, proxy_uri):
     """Ensure embedded methods end up in dir() of objects.
 
     This is a crude proxy for the ability to tab-complete."""
-    s = await resolve("Wrapper", accept_types, simple)
+    s = await resolve("Wrapper", accept_types, simple, uri=proxy_uri)
     assert "increment" in dir(s)
 
 
 @pytest.mark.parametrize("simple", [True, False])
 @pytest.mark.parametrize("accept_types", ACCEPT_TYPES)
 @pytest.mark.asyncio
-async def test_tuberpy_module_docstrings(tuber_call, accept_types, simple):
+async def test_tuberpy_module_docstrings(accept_types, simple, proxy_uri):
     """Ensure docstrings in C++ methods end up in the TuberObject's __doc__ dunder."""
 
-    s = await resolve("Wrapper", accept_types, simple)
+    s = await resolve("Wrapper", accept_types, simple, uri=proxy_uri)
     assert s.__doc__.strip() == tm.Wrapper.__doc__.strip()
 
 
 @pytest.mark.parametrize("simple", [True, False])
 @pytest.mark.parametrize("accept_types", ACCEPT_TYPES)
 @pytest.mark.asyncio
-async def test_tuberpy_method_docstrings(tuber_call, accept_types, simple):
+async def test_tuberpy_method_docstrings(accept_types, simple, proxy_uri):
     """Ensure docstrings in C++ methods end up in the TuberObject's __doc__ dunder."""
 
-    s = await resolve("Wrapper", accept_types, simple)
+    s = await resolve("Wrapper", accept_types, simple, uri=proxy_uri)
     assert s.increment.__doc__.strip() == tm.Wrapper.increment.__doc__.split("\n", 1)[-1].strip()
 
     # check signature
@@ -495,9 +452,9 @@ async def test_tuberpy_method_docstrings(tuber_call, accept_types, simple):
 @pytest.mark.parametrize("simple", [False])
 @pytest.mark.parametrize("accept_types", ACCEPT_TYPES)
 @pytest.mark.asyncio
-async def test_tuberpy_session_cache(tuber_call, accept_types, simple):
+async def test_tuberpy_session_cache(accept_types, simple, proxy_uri):
     """Ensure we don't create a new ClientSession with every call."""
-    s = await resolve("Wrapper", accept_types, simple)
+    s = await resolve("Wrapper", accept_types, simple, uri=proxy_uri)
     await s.increment([1, 2, 3])
     aiohttp.ClientSession = None  # break ClientSession instantiation
     await s.increment([4, 5, 6])
@@ -509,21 +466,15 @@ async def test_tuberpy_session_cache(tuber_call, accept_types, simple):
 @pytest.mark.parametrize("simple", [True, False])
 @pytest.mark.parametrize("accept_types", ACCEPT_TYPES)
 @pytest.mark.asyncio
-async def test_tuberpy_async_context(tuber_call, accept_types, simple):
+async def test_tuberpy_async_context(accept_types, simple, proxy_uri):
     """Ensure we can use tuber_contexts to batch calls."""
-    s = await resolve("Wrapper", accept_types, simple)
+    s = await resolve("Wrapper", accept_types, simple, uri=proxy_uri)
 
-    if simple:
-        with s.tuber_context() as ctx:
-            r1 = ctx.increment([1, 2, 3])
-            r2 = ctx.increment([2, 3, 4])
-        r1, r2 = [x.result() for x in [r1, r2]]
-    else:
-        async with s.tuber_context() as ctx:
-            r1 = ctx.increment([1, 2, 3])
-            r2 = ctx.increment([2, 3, 4])
+    async with tuber_context(s) as ctx:
+        r1 = ctx.increment([1, 2, 3])
+        r2 = ctx.increment([2, 3, 4])
 
-        r1, r2 = await asyncio.gather(r1, r2)
+    r1, r2 = await asyncio.gather(*map(tuber_result, [r1, r2]))
 
     assert r1 == [2, 3, 4]
     assert r2 == [3, 4, 5]
@@ -532,22 +483,15 @@ async def test_tuberpy_async_context(tuber_call, accept_types, simple):
 @pytest.mark.parametrize("simple", [True, False])
 @pytest.mark.parametrize("accept_types", ACCEPT_TYPES)
 @pytest.mark.asyncio
-async def test_tuberpy_async_context_with_kwargs(tuber_call, accept_types, simple):
+async def test_tuberpy_async_context_with_kwargs(accept_types, simple, proxy_uri):
     """Ensure we can use tuber_contexts to batch calls."""
-    s = await resolve("Wrapper", accept_types, simple)
+    s = await resolve("Wrapper", accept_types, simple, uri=proxy_uri)
 
-    if simple:
-        with s.tuber_context(x=[1, 2, 3]) as ctx:
-            r1 = ctx.increment()
-            r2 = ctx.increment()
+    async with tuber_context(s, x=[1, 2, 3]) as ctx:
+        r1 = ctx.increment()
+        r2 = ctx.increment()
 
-        r1, r2 = [x.result() for x in [r1, r2]]
-    else:
-        async with s.tuber_context(x=[1, 2, 3]) as ctx:
-            r1 = ctx.increment()
-            r2 = ctx.increment()
-
-        r1, r2 = await asyncio.gather(r1, r2)
+    r1, r2 = await asyncio.gather(*map(tuber_result, [r1, r2]))
 
     assert r1 == [2, 3, 4]
     assert r2 == [2, 3, 4]
@@ -556,77 +500,56 @@ async def test_tuberpy_async_context_with_kwargs(tuber_call, accept_types, simpl
 @pytest.mark.parametrize("simple", [True, False])
 @pytest.mark.parametrize("accept_types", ACCEPT_TYPES)
 @pytest.mark.asyncio
-async def test_tuberpy_async_context_with_exception(tuber_call, accept_types, simple):
+async def test_tuberpy_async_context_with_exception(accept_types, simple, proxy_uri):
     """Ensure exceptions in a sequence of calls show up as expected."""
-    s = await resolve("Wrapper", accept_types, simple)
+    s = await resolve("Wrapper", accept_types, simple, uri=proxy_uri)
 
     with pytest.raises(tuber.TuberRemoteError):
-        if simple:
-            with s.tuber_context() as ctx:
-                r1 = ctx.increment([1, 2, 3])
-                r2 = ctx.increment(4)
-                r3 = ctx.increment([5, 6, 6])
-        else:
-            async with s.tuber_context() as ctx:
-                r1 = ctx.increment([1, 2, 3])  # fine
-                r2 = ctx.increment(4)  # wrong type
-                r3 = ctx.increment([5, 6, 6])  # shouldn't execute
+        async with tuber_context(s) as ctx:
+            r1 = ctx.increment([1, 2, 3])  # fine
+            r2 = ctx.increment(4)  # wrong type
+            r3 = ctx.increment([5, 6, 6])  # shouldn't execute
 
         # execution happens when ctx falls out of scope - exception raised
 
     # the first call should have succeeded
-    if simple:
-        r1.result()
-    else:
-        await r1
+    await tuber_result(r1)
 
     # the second call generated the exception
     with pytest.raises(tuber.TuberRemoteError):
-        if simple:
-            r2.result()
-        else:
-            await r2
+        await tuber_result(r2)
 
     # the third call should not have been executed (propagated here as an
     # exception too)
     with pytest.raises(tuber.TuberRemoteError):
-        if simple:
-            r3.result()
-        else:
-            await r3
+        await tuber_result(r3)
 
 
 @pytest.mark.parametrize("simple", [True, False])
 @pytest.mark.parametrize("accept_types", ACCEPT_TYPES)
 @pytest.mark.asyncio
-async def test_tuberpy_unserializable(tuber_call, accept_types, simple):
+async def test_tuberpy_unserializable(accept_types, simple, proxy_uri):
     """Ensure unserializable objects return an error."""
-    s = await resolve("Wrapper", accept_types, simple)
+    s = await resolve("Wrapper", accept_types, simple, uri=proxy_uri)
     with pytest.raises(tuber.TuberRemoteError):
-        r = s.unserializable()
-        if not simple:
-            await r
+        r = await tuber_result(s.unserializable())
 
 
 @pytest.mark.parametrize("simple", [True, False])
 @pytest.mark.parametrize("accept_types", ACCEPT_TYPES)
 @pytest.mark.asyncio
-async def test_tuberpy_serialize_enum_class(tuber_call, accept_types, simple):
+async def test_tuberpy_serialize_enum_class(accept_types, simple, proxy_uri):
     """Return an enum class, which must be converted in pybind11 to something serializable."""
-    s = await resolve("Wrapper", accept_types, simple)
+    s = await resolve("Wrapper", accept_types, simple, uri=proxy_uri)
 
     # Retrieve a Kind::X value
-    r = s.return_x()
-    if not simple:
-        r = await r
+    r = await tuber_result(s.return_x())
 
     # Make sure it's serialized to a string as expected
     assert r == "X"
 
     # Ensure we can round-trip it back into C++
-    r = s.is_x(r)
-    if not simple:
-        r = await r
+    r = await tuber_result(s.is_x(r))
 
     assert r is True
 
@@ -635,72 +558,51 @@ async def test_tuberpy_serialize_enum_class(tuber_call, accept_types, simple):
 @pytest.mark.parametrize("simple", [True, False])
 @pytest.mark.parametrize("accept_types", ACCEPT_TYPES)
 @pytest.mark.asyncio
-async def test_tuberpy_async_context_with_unserializable(tuber_call, accept_types, simple):
+async def test_tuberpy_async_context_with_unserializable(accept_types, simple, proxy_uri):
     """Ensure exceptions in a sequence of calls show up as expected."""
-    s = await resolve("Wrapper", accept_types, simple)
+    s = await resolve("Wrapper", accept_types, simple, uri=proxy_uri)
 
-    if simple:
-        with s.tuber_context() as ctx:
-            r1 = ctx.increment([1, 2, 3])  # fine
-            r2 = ctx.unserializable()
-            r3 = ctx.increment([5, 6, 6])  # shouldn't execute
-
-    async with s.tuber_context() as ctx:
+    async with tuber_context(s) as ctx:
         r1 = ctx.increment([1, 2, 3])  # fine
         r2 = ctx.unserializable()
         r3 = ctx.increment([5, 6, 6])  # shouldn't execute
 
-    if simple:
-        r1.result()
-    else:
-        await r1
+    await tuber_result(r1)
 
     with pytest.raises(tuber.TuberRemoteError):
-        if simple:
-            r2.result()
-        else:
-            await r2
+        await tuber_result(r2)
 
     with pytest.raises(tuber.TuberRemoteError):
-        if simple:
-            r3.result()
-        else:
-            await r3
+        await tuber_result(r3)
 
 
 @pytest.mark.parametrize("simple", [True, False])
 @pytest.mark.parametrize("accept_types", ACCEPT_TYPES)
 @pytest.mark.asyncio
-async def test_tuberpy_warnings(tuber_call, accept_types, simple):
+async def test_tuberpy_warnings(accept_types, simple, proxy_uri):
     """Ensure warnings are captured"""
-    s = await resolve("Warnings", accept_types, simple)
+    s = await resolve("Warnings", accept_types, simple, uri=proxy_uri)
 
     # Single, simple warning
     with pytest.warns(match="This is a warning"):
-        r = s.single_warning("This is a warning")
-        if not simple:
-            await r
+        r = await tuber_result(s.single_warning("This is a warning"))
 
     # Several in a row
     with pytest.warns() as ws:
-        r = s.multiple_warnings(warning_count=5)
-        if not simple:
-            await r
+        r = await tuber_result(s.multiple_warnings(warning_count=5))
         assert len(ws) == 5
 
     # Check with exceptions
     with pytest.raises(tuber.TuberRemoteError), pytest.warns(match="This is a warning"):
-        r = s.single_warning("This is a warning", error=True)
-        if not simple:
-            await r
+        r = await tuber_result(s.single_warning("This is a warning", error=True))
 
 
 @pytest.mark.parametrize("simple", [True, False])
 @pytest.mark.parametrize("accept_types", ACCEPT_TYPES)
 @pytest.mark.asyncio
-async def test_tuberpy_resolve_all(tuber_call, accept_types, simple):
+async def test_tuberpy_resolve_all(accept_types, simple, proxy_uri):
     """Ensure resolve finds all registry entries"""
-    s = await resolve(accept_types=accept_types, simple=simple)
+    s = await resolve(accept_types=accept_types, simple=simple, uri=proxy_uri)
 
     assert set(dir(s)) >= set(registry)
     assert set(dir(s.Types)) >= set(dir(registry["Types"]))
@@ -709,36 +611,22 @@ async def test_tuberpy_resolve_all(tuber_call, accept_types, simple):
 @pytest.mark.parametrize("simple", [True, False])
 @pytest.mark.parametrize("accept_types", ACCEPT_TYPES)
 @pytest.mark.asyncio
-async def test_tuberpy_registry_context(tuber_call, accept_types, simple):
+async def test_tuberpy_registry_context(accept_types, simple, proxy_uri):
     """Ensure registry entries are accessible from top level context"""
 
-    s = await resolve(accept_types=accept_types, simple=simple)
+    s = await resolve(accept_types=accept_types, simple=simple, uri=proxy_uri)
 
-    if simple:
-        with s.tuber_context() as ctx:
-            ctx.Wrapper.increment(x=[1, 2, 3])
-            ctx.Types.integer_function()
-            r1, r2 = ctx()
+    async with tuber_context(s) as ctx:
+        ctx.Wrapper.increment(x=[1, 2, 3])
+        ctx.Types.integer_function()
+        r1, r2 = await ctx()
 
-            with pytest.raises(tuber.TuberRemoteError):
-                ctx.Wrapper.not_a_function()
-                ctx()
-            with pytest.raises(tuber.TuberRemoteError):
-                ctx.NotAnAttribute.not_a_function()
-                ctx()
-
-    else:
-        async with s.tuber_context() as ctx:
-            ctx.Wrapper.increment(x=[1, 2, 3])
-            ctx.Types.integer_function()
-            r1, r2 = await ctx()
-
-            with pytest.raises(tuber.TuberRemoteError):
-                ctx.Wrapper.not_a_function()
-                await ctx()
-            with pytest.raises(tuber.TuberRemoteError):
-                ctx.NotAnAttribute.not_a_function()
-                await ctx()
+        with pytest.raises(tuber.TuberRemoteError):
+            ctx.Wrapper.not_a_function()
+            await ctx()
+        with pytest.raises(tuber.TuberRemoteError):
+            ctx.NotAnAttribute.not_a_function()
+            await ctx()
 
     assert r1 == [2, 3, 4]
     assert r2 == Types.INTEGER
@@ -747,10 +635,10 @@ async def test_tuberpy_registry_context(tuber_call, accept_types, simple):
 @pytest.mark.parametrize("simple", [True])
 @pytest.mark.parametrize("accept_types", ACCEPT_TYPES)
 @pytest.mark.asyncio
-async def test_tuberpy_fake_async(tuber_call, accept_types, simple):
+async def test_tuberpy_fake_async(accept_types, simple, proxy_uri):
     """Ensure async execution works with simple context"""
 
-    s = await resolve(accept_types=accept_types, simple=True)
+    s = await resolve(accept_types=accept_types, simple=True, uri=proxy_uri)
 
     with s.tuber_context() as ctx:
         ctx.Wrapper.increment(x=[1, 2, 3])
@@ -768,49 +656,30 @@ async def test_tuberpy_fake_async(tuber_call, accept_types, simple):
 @pytest.mark.parametrize("simple", [True, False])
 @pytest.mark.parametrize("accept_types", ACCEPT_TYPES)
 @pytest.mark.asyncio
-async def test_tuberpy_continue_errors(tuber_call, accept_types, simple, continue_on_error):
+async def test_tuberpy_continue_errors(accept_types, simple, continue_on_error, proxy_uri):
     """Ensure errors are turned into warnings"""
-    s = await resolve(accept_types=accept_types, simple=simple)
+    s = await resolve(accept_types=accept_types, simple=simple, uri=proxy_uri)
 
     with pytest.warns(match="This is a warning"):
-        if simple:
-            with s.tuber_context() as ctx:
-                r1 = ctx.Wrapper.increment([1, 2, 3])  # fine
-                r2 = ctx.Warnings.single_warning("This is a warning", error=True)
-                r3 = ctx.Wrapper.increment([5, 6, 6])  # should still execute
-                if not continue_on_error:
-                    with pytest.raises(tuber.TuberRemoteError):
-                        ctx()
-                    with pytest.raises(tuber.TuberRemoteError):
-                        r3.result()
-                else:
-                    try:
-                        ctx(continue_on_error=True)
-                    except tuber.TuberRemoteError:
-                        pass
-                    with pytest.raises(tuber.TuberRemoteError):
-                        r2.result()
-                    r1 = r1.result()
-                    r3 = r3.result()
-        else:
-            async with s.tuber_context() as ctx:
-                r1 = ctx.Wrapper.increment([1, 2, 3])  # fine
-                r2 = ctx.Warnings.single_warning("This is a warning", error=True)
-                r3 = ctx.Wrapper.increment([5, 6, 6])  # should still execute
-                if not continue_on_error:
-                    with pytest.raises(tuber.TuberRemoteError):
-                        await ctx()
-                    with pytest.raises(tuber.TuberRemoteError):
-                        await r3
-                else:
-                    try:
-                        await ctx(continue_on_error=True)
-                    except tuber.TuberRemoteError:
-                        pass
-                    with pytest.raises(tuber.TuberRemoteError):
-                        await r2
-                    r1 = await r1
-                    r3 = await r3
+        async with tuber_context(s) as ctx:
+            r1 = ctx.Wrapper.increment([1, 2, 3])  # fine
+            r2 = ctx.Warnings.single_warning("This is a warning", error=True)
+            r3 = ctx.Wrapper.increment([5, 6, 6])  # should still execute
+            if not continue_on_error:
+                with pytest.raises(tuber.TuberRemoteError):
+                    await ctx()
+                with pytest.raises(tuber.TuberRemoteError):
+                    await tuber_result(r3)
+
+            else:
+                try:
+                    await ctx(continue_on_error=True)
+                except tuber.TuberRemoteError:
+                    pass
+                with pytest.raises(tuber.TuberRemoteError):
+                    await tuber_result(r2)
+                r1 = await tuber_result(r1)
+                r3 = await tuber_result(r3)
 
     if not continue_on_error:
         return
@@ -822,9 +691,9 @@ async def test_tuberpy_continue_errors(tuber_call, accept_types, simple, continu
 @pytest.mark.parametrize("simple", [True, False])
 @pytest.mark.parametrize("accept_types", ACCEPT_TYPES)
 @pytest.mark.asyncio
-async def test_tuberpy_containers(tuber_call, accept_types, simple):
+async def test_tuberpy_containers(accept_types, simple, proxy_uri):
     """Test dynamic attributes and container access"""
-    s = await resolve(accept_types=accept_types, simple=simple)
+    s = await resolve(accept_types=accept_types, simple=simple, uri=proxy_uri)
 
     assert len(s.ObjectList) == 2
     assert len(s.ObjectListList) == 2
@@ -852,9 +721,9 @@ async def test_tuberpy_containers(tuber_call, accept_types, simple):
 @pytest.mark.parametrize("simple", [True, False])
 @pytest.mark.parametrize("accept_types", ACCEPT_TYPES)
 @pytest.mark.asyncio
-async def test_tuberpy_container_context(tuber_call, accept_types, simple):
+async def test_tuberpy_container_context(accept_types, simple, proxy_uri):
     """Ensure containers work in contexts"""
-    s = await resolve(accept_types=accept_types, simple=simple)
+    s = await resolve(accept_types=accept_types, simple=simple, uri=proxy_uri)
 
     if simple:
         with s.tuber_context() as ctx:
@@ -876,9 +745,9 @@ async def test_tuberpy_container_context(tuber_call, accept_types, simple):
 @pytest.mark.parametrize("simple", [True, False])
 @pytest.mark.parametrize("accept_types", ACCEPT_TYPES)
 @pytest.mark.asyncio
-async def test_tuberpy_container_property_context(tuber_call, accept_types, simple):
+async def test_tuberpy_container_property_context(accept_types, simple, proxy_uri):
     """Ensure methods of container objects work in contexts"""
-    s = await resolve("ObjectWithContainerProperties", accept_types=accept_types, simple=simple)
+    s = await resolve("ObjectWithContainerProperties", accept_types=accept_types, simple=simple, uri=proxy_uri)
 
     r1 = s.method_objects["a"].method()
     if not simple:
@@ -902,9 +771,9 @@ async def test_tuberpy_container_property_context(tuber_call, accept_types, simp
 @pytest.mark.parametrize("simple", [True, False])
 @pytest.mark.parametrize("accept_types", ACCEPT_TYPES)
 @pytest.mark.asyncio
-async def test_tuberpy_container_properties(tuber_call, accept_types, simple):
+async def test_tuberpy_container_properties(accept_types, simple, proxy_uri):
     """Collect properties and method calls for container objects"""
-    s = await resolve(accept_types=accept_types, simple=simple)
+    s = await resolve(accept_types=accept_types, simple=simple, uri=proxy_uri)
 
     pobjs = s.ObjectWithContainerProperties.property_objects
     r1 = pobjs.tuber_get("PROPERTY")

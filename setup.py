@@ -30,12 +30,7 @@ class CMakeBuild(build_ext):
         if (sys.platform != "linux") and (not sys.platform.startswith("darwin")):
             raise DistutilsPlatformError("Cannot compile tuberd on non-Linux platform!")
 
-        # Must be in this form due to bug in .resolve() only fixed in Python 3.10+
-        ext_fullpath = Path.cwd() / self.get_ext_fullpath(ext.name)
-        extdir = ext_fullpath.parent.resolve()
-
         cmake_args = []
-        build_args = []
 
         # Adding CMake arguments set as environment variable
         if "CMAKE_ARGS" in os.environ:
@@ -50,24 +45,29 @@ class CMakeBuild(build_ext):
             pbdir = pybind11.get_cmake_dir()
             cmake_args += [f"-Dpybind11_DIR={pbdir}"]
 
-        build_temp = Path(self.build_temp) / ext.name
+        build_temp = Path(self.build_temp)
         if not build_temp.exists():
             build_temp.mkdir(parents=True)
 
-        subprocess.run(["cmake", ext.sourcedir, *cmake_args], cwd=build_temp, check=True)
-        subprocess.run(["cmake", "--build", ".", *build_args], cwd=build_temp, check=True)
+        rtlib = build_temp / self.get_ext_filename("_tuber_runtime")
+        tmlib = build_temp / self.get_ext_filename("test_module")
 
-        # add server module
-        tuber_lib = Path(self.build_lib) / "tuber"
-        if not tuber_lib.exists():
-            tuber_lib.mkdir(parents=True)
-        self.copy_file(build_temp / self.get_ext_filename("_tuber_runtime"), tuber_lib)
+        if not rtlib.exists() or not tmlib.exists():
+            # build once
+            subprocess.run(["cmake", ext.sourcedir, *cmake_args], cwd=build_temp, check=True)
+            subprocess.run(["cmake", "--build", "."], cwd=build_temp, check=True)
 
-        # add test module
-        test_lib = tuber_lib / "tests"
-        if not test_lib.exists():
-            test_lib.mkdir(parents=True)
-        self.copy_file(build_temp / self.get_ext_filename("test_module"), test_lib)
+            # add server module
+            tuber_lib = Path(self.build_lib) / "tuber"
+            if not tuber_lib.exists():
+                tuber_lib.mkdir(parents=True)
+            self.copy_file(rtlib, tuber_lib)
+
+            # add test module
+            test_lib = tuber_lib / "tests"
+            if not test_lib.exists():
+                test_lib.mkdir(parents=True)
+            self.copy_file(tmlib, test_lib)
 
 
 class CMakeInstallHeaders(install):
@@ -91,7 +91,7 @@ class CMakeInstallHeaders(install):
 
 
 setup(
-    ext_modules=[CMakeExtension("tuberd")],
+    ext_modules=[CMakeExtension("tuber._tuber_runtime"), CMakeExtension("tuber.tests.test_module")],
     cmdclass={
         "build_ext": CMakeBuild,
         "install": CMakeInstallHeaders,
