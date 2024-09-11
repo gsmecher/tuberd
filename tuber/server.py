@@ -7,7 +7,7 @@ import warnings
 import functools
 from .codecs import Codecs
 
-__all__ = ["TuberContainer", "run"]
+__all__ = ["TuberRegistry", "TuberContainer", "run"]
 
 
 # request handling
@@ -396,8 +396,9 @@ class RequestHandler:
         """
         Arguments
         ---------
-        registry : dict
-            Dictionary of user-defined objects with properties and methods.
+        registry : dict or TuberRegistry instance
+            Dictionary of user-defined objects with properties and methods,
+            or a user-created TuberRegistry object.
         json_module : str
             Python package to use for encoding and decoding JSON requests.
         default_format : str
@@ -406,8 +407,10 @@ class RequestHandler:
             If True, validate incoming and outgoing packets with jsonschema.
         """
         # ensure registry is a dictionary
-        assert isinstance(registry, dict), "Invalid registry"
-        self.registry = TuberRegistry(registry)
+        assert isinstance(registry, (dict, TuberRegistry)), "Invalid registry"
+        if not isinstance(registry, TuberRegistry):
+            registry = TuberRegistry(registry)
+        self.registry = registry
 
         # populate codecs
         self.codecs = {}
