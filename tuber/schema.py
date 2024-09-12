@@ -54,16 +54,26 @@ response_warnings = {
     },
 }
 
-response_metadata = {
+metadata_old = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "array",
+}
+
+metadata_recursive = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "type": "object",
-    "properties": {
-        "result": {
-            # any JSON type allowed
+    "additionalProperties": {
+        "type": "object",
+        "properties": {
+            "__doc__": {"type": ["string", "null"]},
+            "objects": {"type": "object"},
+            "properties": {"type": "object"},
+            "methods": {"type": "object"},
+            "keys": {"type": "array"},
+            "values": {"type": "array"},
         },
+        "additionalProperties": False,
     },
-    "required": ["result"],
-    "additionalProperties": False,
 }
 
 response_valid_single = {

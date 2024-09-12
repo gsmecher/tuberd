@@ -438,9 +438,7 @@ class RequestHandler:
 
         try:
             if not ("object" in request and "method" in request):
-                description = self.describe(request)
-                self.validate(description, schema.response_metadata)
-                return description
+                return self.describe(request)
 
             objname = request["object"]
             obj = self.registry[objname]
@@ -498,8 +496,11 @@ class RequestHandler:
             # registry metadata
             if resolve:
                 objects = {obj: resolve_object(self.registry[obj]) for obj in self.registry}
+                self.validate(objects, schema.metadata_recursive)
             else:
                 objects = list(self.registry)
+                self.validate(objects, schema.metadata_old)
+
             return result_response(objects=objects)
 
         obj = self.registry[objname]
