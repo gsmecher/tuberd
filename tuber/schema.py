@@ -1,12 +1,11 @@
 """
 JSON Schemas for tuber requests and responses.
 
-These schemas are NOT verified in deployment - they are only used in test code,
-where a proxy server sits between the client-side tests and server and ensures
-conformance along the way.
-
-There is a sneaky side-effect - any tests that use this validation layer, by
-construction, do not test invalid requests.
+These schemas are only verified in deployment when the "--validate" flag is set
+on tuberd. This is not ordinarily true in deployment. Hence, jsonquery is a
+belt-and-braces way to ensure the server and client code are conformant to a
+particular specification. It is not meant to protect against ill-crafted or
+malicious requests.
 """
 
 """
@@ -28,6 +27,7 @@ request_single = {
         },
         "property": {"type": "string"},
         "method": {"type": "string"},
+        "resolve": {"type": "boolean"},
     },
     "additionalProperties": False,
 }
@@ -51,6 +51,38 @@ response_warnings = {
     "type": "array",
     "items": {
         "type": "string",
+    },
+}
+
+metadata_old = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "array",
+}
+
+metadata_recursive = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "type": "object",
+    "additionalProperties": {
+        "type": "object",
+        "properties": {
+            "__doc__": {"type": ["string", "null"]},
+            "objects": {"type": "object"},
+            "properties": {"type": "object"},
+            "methods": {"type": "object"},
+            "keys": {
+                "oneOf": [
+                    {"type": "array"},
+                    {"type": "integer"},
+                ],
+            },
+            "values": {
+                "oneOf": [
+                    {"type": "array"},
+                    {"type": "object"},
+                ],
+            },
+        },
+        "additionalProperties": False,
     },
 }
 
