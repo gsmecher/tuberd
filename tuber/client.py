@@ -598,16 +598,24 @@ class SimpleTuberObject:
 
         # container of objects
         if hasattr(meta, "values"):
+            values = meta.values
             keys = getattr(meta, "keys", None)
-            if keys is None:
+            if keys is None or isinstance(keys, int):
                 islist = True
-                keys = range(len(meta.values))
-                items = [None] * len(meta.values)
+                if isinstance(keys, int):
+                    size = keys
+                    values = [values] * size
+                else:
+                    size = len(values)
+                keys = range(size)
+                items = [None] * size
             else:
                 islist = False
+                if not isinstance(values, list):
+                    values = [values] * len(keys)
                 items = dict()
 
-            for k, objmeta in zip(keys, meta.values):
+            for k, objmeta in zip(keys, values):
                 items[k] = self._resolve_object(item=k, meta=objmeta)
 
             self._items = items

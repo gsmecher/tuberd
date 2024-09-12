@@ -9,7 +9,7 @@ import functools
 from .codecs import Codecs
 from . import schema
 
-__all__ = ["TuberRegistry", "TuberContainer", "run"]
+__all__ = ["TuberRegistry", "TuberContainer", "TuberArray", "run"]
 
 
 # request handling
@@ -72,13 +72,19 @@ def resolve_object(obj, recursive=True):
         methods = []
         props = []
     clsname = obj.__class__.__name__
+    mro = obj.__class__.mro()
+    exclude = getattr(obj, "__tuber_exclude__", [])
 
     out = dict(__doc__=inspect.getdoc(obj), methods=methods, properties=props)
 
     for d in dir(obj):
         # Don't export dunder methods or attributes - this avoids exporting
         # Python internals on the server side to any client.
+        if d in exclude:
+            continue
         if d.startswith("__") or d.startswith(f"_{clsname}__"):
+            continue
+        if any([d.startswith(f"_{c.__name__}__") for c in mro]):
             continue
         attr = getattr(obj, d)
         if recursive:
@@ -113,26 +119,22 @@ class TuberContainer:
     """Container for grouping objects"""
 
     __tuber_object__ = True
+    __tuber_exclude__ = ["_items"]
 
-    def __init__(self, data):
+    def __init__(self, items):
         """
         Arguments
         ---------
-        data : list or dict
+        items : list or dict
             A list or dictionary of objects
         """
-        if isinstance(data, list):
-            if not data:
-                raise ValueError("Empty list container")
-            values = data
-        elif isinstance(data, dict):
-            if not data:
-                raise ValueError("Empty dict container")
-            values = list(data.values())
-        else:
+        if not isinstance(items, (list, dict)):
             raise TypeError("Invalid container type")
 
-        self.__data = data
+        if not items:
+            raise ValueError("Empty container")
+
+        self._items = items
 
     def tuber_call(self, method, *args, **kwargs):
         """Call a method on every container item.
@@ -143,24 +145,24 @@ class TuberContainer:
         """
         keys = kwargs.pop("keys", None)
         if keys is None:
-            if isinstance(self.__data, list):
-                keys = range(len(self.__data))
+            if isinstance(self._items, list):
+                keys = range(len(self))
             else:
-                keys = self.__data.keys()
-        data = [self.__data[k] for k in keys]
-        return [getattr(v, method)(*args, **kwargs) for v in data]
+                keys = self.keys()
+
+        return [getattr(self[k], method)(*args, **kwargs) for k in keys]
 
     def tuber_meta(self):
         """
         Return a dict with descriptions of all items in the collection, with
         sufficient information to reconstruct the collection on the client side.
         """
-        if isinstance(self.__data, list):
+        if isinstance(self._items, list):
             keys = None
-            values = self.__data
+            values = self._items
         else:
-            keys = list(self.__data.keys())
-            values = self.__data.values()
+            keys = list(self._items.keys())
+            values = self._items.values()
 
         out = {"values": [resolve_object(v) for v in values]}
         if keys is not None:
@@ -169,16 +171,35 @@ class TuberContainer:
         return out
 
     def __getattr__(self, name):
-        return getattr(self.__data, name)
+        print("getattr", name)
+        return getattr(self._items, name)
 
     def __len__(self):
-        return len(self.__data)
+        return len(self._items)
 
     def __iter__(self):
-        return iter(self.__data)
+        return iter(self._items)
 
     def __getitem__(self, item):
-        return self.__data[item]
+        return self._items[item]
+
+
+class TuberArray(TuberContainer):
+    """Container for grouping identical objects"""
+
+    def tuber_meta(self):
+        """
+        Return a dict with descriptions of all items in the collection, with
+        sufficient information to reconstruct the collection on the client side.
+        """
+        if isinstance(self._items, list):
+            keys = len(self._items)
+            value = self._items[0]
+        else:
+            keys = list(self._items.keys())
+            value = self._items[keys[0]]
+
+        return {"keys": keys, "values": resolve_object(value)}
 
 
 class TuberRegistry:

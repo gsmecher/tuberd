@@ -15,7 +15,7 @@ if os.getenv("CMAKE_TEST"):
 else:
     from tuber.tests import test_module as tm
 
-from tuber.server import TuberContainer
+from tuber.server import TuberContainer, TuberArray
 
 
 # REGISTRY DEFINITIONS
@@ -42,8 +42,8 @@ class ObjectWithPrivateMethod:
 
 
 class ObjectWithContainerProperties:
-    property_objects = TuberContainer([ObjectWithProperty(), ObjectWithProperty()])
-    method_objects = TuberContainer({"a": ObjectWithMethod(), "b": ObjectWithMethod()})
+    property_objects = TuberArray([ObjectWithProperty(), ObjectWithProperty()])
+    method_objects = TuberArray({"a": ObjectWithMethod(), "b": ObjectWithMethod()})
 
 
 class Types:
@@ -108,10 +108,10 @@ registry = {
     "ObjectWithProperty": ObjectWithProperty(),
     "ObjectWithPrivateMethod": ObjectWithPrivateMethod(),
     "ObjectWithContainerProperties": ObjectWithContainerProperties(),
-    "ObjectList": TuberContainer([ObjectWithContainerProperties(), ObjectWithContainerProperties()]),
-    "ObjectDict": TuberContainer({"a": ObjectWithContainerProperties(), "b": ObjectWithContainerProperties()}),
-    "ObjectListList": TuberContainer(
-        [TuberContainer([ObjectWithContainerProperties()]), TuberContainer([ObjectWithContainerProperties])]
+    "ObjectList": TuberArray([ObjectWithContainerProperties(), ObjectWithContainerProperties()]),
+    "ObjectDict": TuberArray({"a": ObjectWithContainerProperties(), "b": ObjectWithContainerProperties()}),
+    "ObjectListList": TuberArray(
+        [TuberArray([ObjectWithContainerProperties()]), TuberArray([ObjectWithContainerProperties])]
     ),
     "Container": TuberContainer({"a": ObjectWithProperty(), "b": ObjectWithMethod()}),
     "Types": Types(),
@@ -142,9 +142,7 @@ def Failed(warnings=None, **kwargs):
     return dict(error=kwargs)
 
 
-container_success = Succeeded(
-    __doc__=TuberContainer.__doc__.strip(), methods=["tuber_call", "tuber_meta"], properties=[]
-)
+container_success = Succeeded(__doc__=TuberArray.__doc__.strip(), methods=["tuber_call", "tuber_meta"], properties=[])
 
 
 def test_empty_request_array(tuber_call):

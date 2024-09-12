@@ -69,8 +69,18 @@ metadata_recursive = {
             "objects": {"type": "object"},
             "properties": {"type": "object"},
             "methods": {"type": "object"},
-            "keys": {"type": "array"},
-            "values": {"type": "array"},
+            "keys": {
+                "oneOf": [
+                    {"type": "array"},
+                    {"type": "integer"},
+                ],
+            },
+            "values": {
+                "oneOf": [
+                    {"type": "array"},
+                    {"type": "object"},
+                ],
+            },
         },
         "additionalProperties": False,
     },
