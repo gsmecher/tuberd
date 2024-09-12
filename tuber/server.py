@@ -53,6 +53,20 @@ def resolve_method(method):
     return dict(__doc__=doc, __signature__=sig)
 
 
+def check_attribute(obj, d):
+    """
+    Return True if the given attribute is safe to resolve, False otherwise.
+    """
+    if d.startswith("__"):
+        return False
+    if d in getattr(obj, "__tuber_exclude__", []):
+        return False
+    for c in obj.__class__.mro():
+        if d.startswith(f"_{c.__name__}__"):
+            return False
+    return True
+
+
 def resolve_object(obj, recursive=True):
     """
     Return a dictionary of all valid object attributes classified by type.
@@ -71,20 +85,13 @@ def resolve_object(obj, recursive=True):
     else:
         methods = []
         props = []
-    clsname = obj.__class__.__name__
-    mro = obj.__class__.mro()
-    exclude = getattr(obj, "__tuber_exclude__", [])
 
     out = dict(__doc__=inspect.getdoc(obj), methods=methods, properties=props)
 
     for d in dir(obj):
         # Don't export dunder methods or attributes - this avoids exporting
         # Python internals on the server side to any client.
-        if d in exclude:
-            continue
-        if d.startswith("__") or d.startswith(f"_{clsname}__"):
-            continue
-        if any([d.startswith(f"_{c.__name__}__") for c in mro]):
+        if not check_attribute(obj, d):
             continue
         attr = getattr(obj, d)
         if recursive:
