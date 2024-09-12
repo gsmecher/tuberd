@@ -28,7 +28,6 @@ if(EXISTS ${CMAKE_SOURCE_DIR}/deps)
 endif()
 
 find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
-find_package(fmt REQUIRED)
 find_package(LibHttpServer REQUIRED)
 find_package(pybind11 REQUIRED)
 find_package(Threads REQUIRED)
@@ -36,7 +35,7 @@ find_package(Threads REQUIRED)
 include(CTest)
 
 pybind11_add_module(_tuber_runtime MODULE src/server.cpp)
-target_link_libraries(_tuber_runtime PUBLIC fmt::fmt ${LIBHTTPSERVER_LIBRARIES} Threads::Threads)
+target_link_libraries(_tuber_runtime PUBLIC ${LIBHTTPSERVER_LIBRARIES} Threads::Threads)
 
 pybind11_add_module(test_module MODULE tests/test_module.cpp)
 target_include_directories(test_module PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

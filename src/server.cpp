@@ -11,24 +11,12 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include <fmt/format.h>
-
 namespace py = pybind11;
 using namespace pybind11::literals;
 
 using namespace httpserver;
 
 namespace fs = std::filesystem;
-
-/* Formatter for Python objects */
-template <typename T>
-struct fmt::formatter<T, std::enable_if_t<std::is_base_of<py::object, T>::value, char>> : fmt::formatter<std::string> {
-
-	template <typename FormatContext>
-	auto format(py::object const& o, FormatContext& ctx) {
-		return fmt::formatter<std::string>::format((std::string)py::str(o), ctx);
-	}
-};
 
 /* pybind11 assumes we're building a shared library (as would be normal for a
  * module, rather than an embedded interpreter) and attempts to tweak
@@ -142,7 +130,7 @@ class DLL_LOCAL file_resource : public http_resource {
 			/* Serve 404 if the resource does not exist, or we couldn't find it */
 			if(!fs::is_regular_file(path)) {
 				if(verbose & Verbose::UNEXPECTED)
-					fmt::print(stderr, "Unable or unwilling to serve missing or non-file resource {}\n", path.string());
+					std::cerr << "Unable or unwilling to serve missing or non-file resource " << path.string() << '\n';
 
 				return std::make_shared<string_response>("No such file or directory.\n", http::http_utils::http_not_found);
 			}
@@ -154,11 +142,13 @@ class DLL_LOCAL file_resource : public http_resource {
 				mime_type = it->second;
 
 			if(verbose & Verbose::NOISY)
-				fmt::print(stderr, "Serving {} with {} using MIME type {}\n", req.get_path(), path.string(), mime_type);
+				std::cerr << "Serving " << req.get_path() << " with " << path.string()
+				          << " using MIME type " << mime_type << '\n';
 
 			/* Construct response and return it */
 			auto response = std::make_shared<file_response>(path.string(), http::http_utils::http_ok, mime_type);
-			response->with_header(http::http_utils::http_header_cache_control, fmt::format("max-age={}", max_age));
+			response->with_header(http::http_utils::http_header_cache_control, 
+			                      "max-age="+std::to_string(max_age));
 			return response;
 		}
 	private:
@@ -210,14 +200,14 @@ void run_server(py::object handler, int port=80, const std::string &webroot="/va
 		fr->set_allowing(MHD_HTTP_METHOD_GET, true);
 		ws->register_resource("/", fr.get(), true);
 	} catch(fs::filesystem_error const& e) {
-		fmt::print(stderr, "Unable to resolve webroot {}; not serving static content.\n", webroot);
+		std::cerr << "Unable to resolve webroot " << webroot << "; not serving static content.\n";
 	}
 
 	/* Go! */
 	try {
 		ws->start(true);
 	} catch(std::exception const& e) {
-		fmt::print("Error: {}\n", e.what());
+		std::cerr << "Error: " << e.what() << '\n';
 	}
 }
 
