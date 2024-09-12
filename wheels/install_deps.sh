@@ -28,15 +28,6 @@ cd $scriptdir/..
 prefix=$PWD/deps
 cd $prefix
 
-[ -e fmt-10.2.1.zip ] || FETCH https://github.com/fmtlib/fmt/releases/download/10.2.1/fmt-10.2.1.zip
-[ -e fmt-10.2.1 ] || unzip fmt-10.2.1.zip
-[ -e fmt-10.2.1/build ] || mkdir fmt-10.2.1/build
-cd fmt-10.2.1/build
-cmake .. -DCMAKE_INSTALL_PREFIX=$prefix -DFMT_TEST=FALSE -DCMAKE_POSITION_INDEPENDENT_CODE=TRUE
-make
-make install
-cd $prefix
-
 [ -e libmicrohttpd-1.0.1.tar.gz ] || FETCH https://github.com/Karlson2k/libmicrohttpd/releases/download/v1.0.1/libmicrohttpd-1.0.1.tar.gz
 [ -e libmicrohttpd-1.0.1 ] || tar xzf libmicrohttpd-1.0.1.tar.gz
 cd libmicrohttpd-1.0.1
