@@ -35,6 +35,7 @@ find_package(Threads REQUIRED)
 include(CTest)
 
 pybind11_add_module(_tuber_runtime MODULE src/server.cpp)
+target_include_directories(_tuber_runtime PUBLIC ${LIBHTTPSERVER_INCLUDE_DIRS})
 target_link_libraries(_tuber_runtime PUBLIC ${LIBHTTPSERVER_LIBRARIES} Threads::Threads)
 
 pybind11_add_module(test_module MODULE tests/test_module.cpp)
