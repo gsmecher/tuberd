@@ -3,7 +3,7 @@ import os
 import warnings
 from .codecs import Codecs
 
-__all__ = ["run"]
+__all__ = ["run", "main"]
 
 
 # request handling
@@ -370,20 +370,39 @@ def run(registry, json_module="json", port=80, webroot="/var/www/", max_age=3600
     )
 
 
-def main():
+def load_registry(filename):
     """
-    Server entry point
+    Load a user registry from a user provided python file
+    """
+
+    import importlib.util
+
+    modname = os.path.splitext(os.path.basename(filename))[0]
+    spec = importlib.util.spec_from_file_location(modname, filename)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+
+    return mod.registry
+
+
+def main(registry=None):
+    """
+    Server entry point.
+
+    If supplied, run the server with the given registry.  Otherwise, use the
+    ``--registry`` command-line argument to provide a path to a registry file.
     """
 
     import argparse as ap
 
     P = ap.ArgumentParser(description="Tuber server")
-    P.add_argument(
-        "-r",
-        "--registry",
-        default="/usr/share/tuberd/registry.py",
-        help="Location of registry Python code",
-    )
+    if registry is None:
+        P.add_argument(
+            "-r",
+            "--registry",
+            default="/usr/share/tuberd/registry.py",
+            help="Location of registry Python code",
+        )
     P.add_argument(
         "-j",
         "--json",
@@ -409,9 +428,8 @@ def main():
     # setup environment
     os.environ["TUBER_SERVER"] = "1"
 
-    code = compile(open(args.registry, "r").read(), args.registry, "exec")
-    exec(code, globals())
-    args.registry = registry
+    # load registry
+    args.registry = registry if registry else load_registry(args.registry)
 
     run(**vars(args))
 
