@@ -139,8 +139,8 @@ CPython 3.8+:
 
    pip install tuberd
 
-Building from source requires the ``libfmt`` and ``libmicrohttpd`` dependencies,
-along with ``libhttpserver``.  To simplify the build process, the
+Building from source requires the ``libmicrohttpd`` and ``libhttpserver``
+dependencies.  To simplify the build process, the
 ``wheels/install_deps.sh`` script can be used to build all the dependencies
 locally and compile against them.  In this instance, ``cmake`` should be able to
 discover the appropriate paths for all dependencies.  Use the ``BUILD_DEPS``
