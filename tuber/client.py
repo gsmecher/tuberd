@@ -477,25 +477,6 @@ class SimpleTuberObject:
         # Useful hint
         raise AttributeError(f"'{self._tuber_objname}' has no attribute '{name}'.  Did you run tuber_resolve()?")
 
-    def tuber_get(self, name: str, keys: list[str | int] | None = None):
-        """Get a property of every container item.
-
-        If object is a container, return a list of property values for each
-        item.  If `keys` is supplied, return only the values corresponding to
-        the given set of container items.
-        """
-        if not self.is_container:
-            raise TypeError(f"'{self._tuber_objname}' object is not a container")
-
-        if keys is None:
-            if isinstance(self._items, list):
-                keys = range(len(self._items))
-            else:
-                keys = self._items.keys()
-        items = [self._items[k] for k in keys]
-
-        return [getattr(v, name) for v in self._items]
-
     def __len__(self):
         try:
             return len(self._items)
@@ -624,6 +605,22 @@ class SimpleTuberObject:
                 setattr(self, "keys", types.MethodType(lambda o: o._items.keys(), self))
                 setattr(self, "values", types.MethodType(lambda o: o._items.values(), self))
                 setattr(self, "items", types.MethodType(lambda o: o._items.items(), self))
+
+            def tuber_get(self, name: str, keys: list[str | int] | None = None):
+                """Get a property of every container item.
+
+                Return a list of property values for each item.  If ``keys`` is
+                supplied, return only the values corresponding to the given set
+                of container items.
+                """
+                if keys is None:
+                    if isinstance(self._items, list):
+                        keys = range(len(self._items))
+                    else:
+                        keys = self._items.keys()
+                return [getattr(self._items[k], name) for k in keys]
+
+            setattr(self, "tuber_get", types.MethodType(tuber_get, self))
 
         self._tuber_meta = meta
         return meta
