@@ -1,0 +1,39 @@
+[build-system]
+requires = [
+    "setuptools>=61",
+    "setuptools_scm[toml]>=6.3",
+    "wheel",
+]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = 'tuber-client'
+readme = 'README.rst'
+requires-python = ">=3.8"
+description = 'Communicate with Python (or C++) objects across a LAN using something like JSON-RPC'
+authors = [
+	{name = "Graeme Smecher", email = "gsmecher@threespeedlogic.com"},
+]
+urls = {source = "https://github.com/gsmecher/tuberd"}
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: BSD License",
+    "Operating System :: OS Independent",
+]
+license = {file = "LICENSE"}
+dependencies = ["requests", "requests-futures"]
+dynamic = ["version"]
+
+[project.optional-dependencies]
+async = ["aiohttp"]
+cbor = ["cbor2"]
+numpy = ["numpy"]
+
+[tool.setuptools]
+packages = ["tuber"]
+
+[tool.setuptools_scm]
+version_file = "tuber/_version.py"
+version_scheme = "only-version"
+local_scheme = "no-local-version"
+root = "../.."
