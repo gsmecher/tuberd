@@ -44,7 +44,7 @@ jobs:
       url: https://pypi.org/p/tuber-client
     permissions:
       id-token: write
-    if: github.event-name == 'release' && github.event.action == 'published'
+    if: github.event_name == 'release' && github.event.action == 'published'
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v4
