@@ -49,7 +49,7 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
-          pattern: client-artifacts
+          name: client-artifacts
           path: dist
 
       - name: Publish package distributions to PyPI
