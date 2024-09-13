@@ -22,10 +22,15 @@ classifiers=[
     "Operating System :: OS Independent",
 ]
 license = {file="LICENSE"}
-dynamic = ["version", "dependencies", "scripts"]
+dependencies = ["requests", "requests-futures"]
+dynamic = ["version", "scripts"]
 
-[tool.setuptools.dynamic]
-dependencies = {file = ["requirements.txt"]}
+[project.optional-dependencies]
+async = ["aiohttp"]
+cbor = ["cbor2"]
+numpy = ["numpy"]
+orjson = ["orjson"]
+dev = ["aiohttp", "cbor2", "jsonschema", "numpy", "orjson", "pytest", "pytest-asyncio"]
 
 [tool.setuptools_scm]
 write_to = "tuber/_version.py"
@@ -36,6 +41,7 @@ local_scheme = "no-local-version"
 line-length = 120
 
 [tool.cibuildwheel]
+test-extras = ["dev"]
 before-all = "./wheels/install_deps.sh"
 test-command = [
     "pytest -sv {project}/tests/test.py --import-mode append",
