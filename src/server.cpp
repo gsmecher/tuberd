@@ -139,7 +139,7 @@ static void sigint(int signo) {
 		ws->stop();
 }
 
-static void run_server(py::object handler, int port=80, const std::string &webroot="/var/www", int max_age=3600)
+static void run_server(py::object handler, int port=80, py::object webroot=py::none(), int max_age=3600)
 {
 	/* Can only run one server at a time */
 	if (ws)
@@ -164,21 +164,17 @@ static void run_server(py::object handler, int port=80, const std::string &webro
 	py::gil_scoped_release release;
 
 	/* If a valid webroot was provided, serve static content for other paths. */
-	try {
-		fr = std::make_unique<file_resource>(fs::canonical(webroot), max_age);
+
+	if (!webroot.is_none()) {
+		std::string wroot = webroot.cast<std::string>();
+		fr = std::make_unique<file_resource>(fs::canonical(wroot), max_age);
 		fr->disallow_all();
 		fr->set_allowing(MHD_HTTP_METHOD_GET, true);
 		ws->register_resource("/", fr.get(), true);
-	} catch(fs::filesystem_error const& e) {
-		std::cerr << "Unable to resolve webroot " << webroot << "; not serving static content.\n";
 	}
 
 	/* Go! */
-	try {
-		ws->start(true);
-	} catch(std::exception const& e) {
-		std::cerr << "Error: " << e.what() << '\n';
-	}
+	ws->start(true);
 }
 
 
@@ -200,5 +196,5 @@ PYBIND11_MODULE(_tuber_runtime, m) {
 	    "    Location to serve static content\n"
 	    "max_age : int\n"
 	    "    Maximum cache residency for static (file) assets\n",
-	    py::arg("handler"), py::arg("port")=80, py::arg("webroot")="/var/www/", py::arg("max_age")=3600);
+	    py::arg("handler"), py::arg("port")=80, py::arg("webroot")=py::none(), py::arg("max_age")=3600);
 }
