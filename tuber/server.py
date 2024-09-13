@@ -194,6 +194,19 @@ class TuberContainer:
 class TuberArray(TuberContainer):
     """Container for grouping identical objects"""
 
+    def __init__(self, items):
+        super().__init__(items)
+
+        if isinstance(self._items, list):
+            values = self._items
+        else:
+            values = list(self._items.values())
+
+        tp = type(values[0])
+        for v in values:
+            if not isinstance(v, tp):
+                raise TypeError("Array items must have the same type")
+
     def tuber_meta(self):
         """
         Return a dict with descriptions of all items in the collection, with
