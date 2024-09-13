@@ -24,22 +24,6 @@ namespace fs = std::filesystem;
  * about symbol visibility here, we follow its lead to squash warnings. */
 #define DLL_LOCAL __attribute__((visibility("hidden")))
 
-/* Verbosity is expressed as a bit mask:
- *     0: none (default)
- *     1: report unexpected or unusual cases
- *     2: very noisy
- */
-static enum class Verbose {
-	NONE = 0,	/* default */
-	UNEXPECTED = 1,	/* report unexected or unusual cases */
-	NOISY = 2,	/* message onslaught */
-} verbose;
-
-/* Operators for log levels */
-inline constexpr int operator&(Verbose const& x, Verbose const& y) {
-	return static_cast<int>(x) & static_cast<int>(y);
-}
-
 /* MIME types */
 static const std::string MIME_JSON="application/json";
 static const std::string MIME_CBOR="application/cbor";
@@ -128,22 +112,14 @@ class DLL_LOCAL file_resource : public http_resource {
 				path /= "index.html";
 
 			/* Serve 404 if the resource does not exist, or we couldn't find it */
-			if(!fs::is_regular_file(path)) {
-				if(verbose & Verbose::UNEXPECTED)
-					std::cerr << "Unable or unwilling to serve missing or non-file resource " << path.string() << '\n';
-
+			if(!fs::is_regular_file(path))
 				return std::make_shared<string_response>("No such file or directory.\n", http::http_utils::http_not_found);
-			}
 
 			/* Figure out a MIME type to use */
 			std::string mime_type = MIME_DEFAULT;
 			auto it = MIME_TYPES.find(path.extension().string());
 			if(it != MIME_TYPES.end())
 				mime_type = it->second;
-
-			if(verbose & Verbose::NOISY)
-				std::cerr << "Serving " << req.get_path() << " with " << path.string()
-				          << " using MIME type " << mime_type << '\n';
 
 			/* Construct response and return it */
 			auto response = std::make_shared<file_response>(path.string(), http::http_utils::http_ok, mime_type);
@@ -163,14 +139,8 @@ static void sigint(int signo) {
 		ws->stop();
 }
 
-void run_server(py::object handler, int port=80, const std::string &webroot="/var/www", int max_age=3600, int verbose_level=0)
+static void run_server(py::object handler, int port=80, const std::string &webroot="/var/www", int max_age=3600)
 {
-	/*
-	 * Parse command-line arguments
-	 */
-
-	verbose = static_cast<Verbose>(verbose_level);
-
 	/* Can only run one server at a time */
 	if (ws)
 		throw std::runtime_error("Tuber server already running!");
@@ -229,9 +199,6 @@ PYBIND11_MODULE(_tuber_runtime, m) {
 	    "webroot : str\n"
 	    "    Location to serve static content\n"
 	    "max_age : int\n"
-	    "    Maximum cache residency for static (file) assets\n"
-	    "verbose : int\n"
-	    "    Verbosity level (0-2)\n",
-	    py::arg("handler"), py::arg("port")=80, py::arg("webroot")="/var/www/",
-	    py::arg("max_age")=3600, py::arg("verbose")=0);
+	    "    Maximum cache residency for static (file) assets\n",
+	    py::arg("handler"), py::arg("port")=80, py::arg("webroot")="/var/www/", py::arg("max_age")=3600);
 }

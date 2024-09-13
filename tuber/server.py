@@ -562,7 +562,7 @@ class RequestHandler:
         return self.handle(*args, **kwargs)
 
 
-def run(registry, json_module="json", port=80, webroot="/var/www/", max_age=3600, validate=False, verbose=0):
+def run(registry, json_module="json", port=80, webroot="/var/www/", max_age=3600, validate=False):
     """
     Run tuber server with the given registry.
 
@@ -580,8 +580,6 @@ def run(registry, json_module="json", port=80, webroot="/var/www/", max_age=3600
         Maximum cache residency for static (file) assets
     validate : bool
         If True, validate incoming and outgoing data packets using jsonschema
-    verbose : int
-        Verbosity level (0-2)
     """
     # setup environment
     os.environ["TUBER_SERVER"] = "1"
@@ -596,13 +594,7 @@ def run(registry, json_module="json", port=80, webroot="/var/www/", max_age=3600
     handler = RequestHandler(registry, json_module, validate=validate)
 
     # run
-    run_server(
-        handler,
-        port=port,
-        webroot=webroot,
-        max_age=max_age,
-        verbose=verbose,
-    )
+    run_server(handler, port=port, webroot=webroot, max_age=max_age)
 
 
 def load_registry(filename):
@@ -657,7 +649,6 @@ def main(registry=None):
     P.add_argument(
         "--validate", action="store_true", help="Validate incoming and outgoing data packets using jsonschema"
     )
-    P.add_argument("-v", "--verbose", type=int, default=0)
     args = P.parse_args()
 
     # setup environment
