@@ -575,7 +575,7 @@ class RequestHandler:
         return self.handle(*args, **kwargs)
 
 
-def run(registry, json_module="json", port=80, webroot="/var/www/", max_age=3600, validate=False):
+def run(registry, json_module="json", port=80, webroot=None, max_age=3600, validate=False):
     """
     Run tuber server with the given registry.
 
@@ -651,7 +651,7 @@ def main(registry=None):
         help="Python JSON module to use for serialization/deserialization",
     )
     P.add_argument("-p", "--port", default=80, type=int, help="Port")
-    P.add_argument("-w", "--webroot", default="/var/www/", help="Location to serve static content")
+    P.add_argument("-w", "--webroot", help="Location to serve static content")
     P.add_argument(
         "-a",
         "--max-age",
