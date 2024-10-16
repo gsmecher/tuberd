@@ -79,6 +79,16 @@ def tuber_wrapper(func: callable, meta: "TuberResult"):
         code = compile(f"def sigfunc{meta.__signature__}:\n pass", "sigfunc", "single")
         exec(code, globals())
         sig = inspect.signature(sigfunc)
+        params = list(sig.parameters.values())
+        p0 = params[0] if len(params) else None
+        # add self argument for unbound method
+        if not p0 or p0.name != "self":
+            if p0 and p0.kind == inspect.Parameter.POSITIONAL_ONLY:
+                kind = p0.kind
+            else:
+                kind = inspect.Parameter.POSITIONAL_OR_KEYWORD
+            parself = inspect.Parameter("self", kind)
+            sig = sig.replace(parameters=[parself] + params)
         func.__signature__ = sig
     except:
         pass
