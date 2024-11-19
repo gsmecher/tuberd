@@ -62,40 +62,6 @@ def attribute_blacklisted(name: str):
     return False
 
 
-def tuber_wrapper(func: callable, meta: "TuberResult"):
-    """
-    Annotate the wrapper function with docstrings and signature.
-    """
-
-    # Attach docstring, if provided and valid
-    try:
-        func.__doc__ = textwrap.dedent(meta.__doc__)
-    except:
-        pass
-
-    # Attach a function signature, if provided and valid
-    try:
-        # build a dummy function to parse its signature with inspect
-        code = compile(f"def sigfunc{meta.__signature__}:\n pass", "sigfunc", "single")
-        exec(code, globals())
-        sig = inspect.signature(sigfunc)
-        params = list(sig.parameters.values())
-        p0 = params[0] if len(params) else None
-        # add self argument for unbound method
-        if not p0 or p0.name != "self":
-            if p0 and p0.kind == inspect.Parameter.POSITIONAL_ONLY:
-                kind = p0.kind
-            else:
-                kind = inspect.Parameter.POSITIONAL_OR_KEYWORD
-            parself = inspect.Parameter("self", kind)
-            sig = sig.replace(parameters=[parself] + params)
-        func.__signature__ = sig
-    except:
-        pass
-
-    return func
-
-
 def get_object_name(parent: str | list, attr: str | None = None, item: str | int | None = None):
     """
     Construct a valid object name for accessing objects in a registry.
@@ -502,7 +468,7 @@ class SimpleTuberObject:
     def __iter__(self):
         try:
             return iter(self._items)
-        except AttributError:
+        except AttributeError:
             raise TypeError(f"'{self._tuber_objname}' object is not iterable")
 
     def object_factory(self, objname: str):
@@ -545,7 +511,15 @@ class SimpleTuberObject:
                 r = getattr(ctx, name)(*args, **kwargs)
             return r.result()
 
-        return tuber_wrapper(invoke, meta)
+        if "__signature__" in meta:
+            # This is a backwards compatibility shim to 0.16 and previous,
+            # where docstrings were split into __signature__ and __doc__.
+            # Turns out this is hard to do in a reliable and secure way.
+            invoke.__doc__ = f"{meta.__name__}{meta.__signature__}:\n{meta.__doc__}"
+        else:
+            invoke.__doc__ = meta.__doc__
+
+        return invoke
 
     def _resolve_object(
         self, attr: str | None = None, item: str | int | None = None, meta: "TuberResult" | None = None
@@ -677,7 +651,15 @@ class TuberObject(SimpleTuberObject):
                 results = await ctx()
             return results[0]
 
-        return tuber_wrapper(invoke, meta)
+        if "__signature__" in meta:
+            # This is a backwards compatibility shim to 0.16 and previous,
+            # where docstrings were split into __signature__ and __doc__.
+            # Turns out this is hard to do in a reliable and secure way.
+            invoke.__doc__ = f"{name}{meta.__signature__}:\n{meta.__doc__}"
+        else:
+            invoke.__doc__ = meta.__doc__
+
+        return invoke
 
 
 # vim: sts=4 ts=4 sw=4 tw=78 smarttab expandtab
