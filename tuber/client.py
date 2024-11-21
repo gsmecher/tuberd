@@ -62,6 +62,25 @@ def attribute_blacklisted(name: str):
     return False
 
 
+def tuber_wrapper(func: callable, name: str, meta: "TuberResult"):
+    """
+    Annotate the wrapper function with docstrings and signature.
+    """
+
+    docstring = ''
+
+    # Begin with a function signature, if provided and valid
+    if (sig := getattr(meta, '__signature__', None)) and isinstance(sig, str):
+        docstring = f"{name}{sig}:\n\n"
+
+    # Attach docstring, if provided and valid
+    if (doc := getattr(meta, "__doc__", None)) and isinstance(doc, str):
+        docstring += textwrap.dedent(meta.__doc__)
+
+    func.__doc__ = docstring.strip()
+    return func
+
+
 def get_object_name(parent: str | list, attr: str | None = None, item: str | int | None = None):
     """
     Construct a valid object name for accessing objects in a registry.
@@ -511,15 +530,7 @@ class SimpleTuberObject:
                 r = getattr(ctx, name)(*args, **kwargs)
             return r.result()
 
-        if (sig := getattr(meta, '__signature__', None)):
-            # This is a backwards compatibility shim to 0.16 and previous,
-            # where docstrings were split into __signature__ and __doc__.
-            # Turns out this is hard to do in a reliable and secure way.
-            invoke.__doc__ = f"{name}{sig}:\n\n{meta.__doc__}"
-        else:
-            invoke.__doc__ = meta.__doc__
-
-        return invoke
+        return tuber_wrapper(invoke, name, meta)
 
     def _resolve_object(
         self, attr: str | None = None, item: str | int | None = None, meta: "TuberResult" | None = None
@@ -651,15 +662,7 @@ class TuberObject(SimpleTuberObject):
                 results = await ctx()
             return results[0]
 
-        if (sig := getattr(meta, '__signature__', None)):
-            # This is a backwards compatibility shim to 0.16 and previous,
-            # where docstrings were split into __signature__ and __doc__.
-            # Turns out this is hard to do in a reliable and secure way.
-            invoke.__doc__ = f"{name}{sig}:\n\n{meta.__doc__}"
-        else:
-            invoke.__doc__ = meta.__doc__
-
-        return invoke
+        return tuber_wrapper(invoke, name, meta)
 
 
 # vim: sts=4 ts=4 sw=4 tw=78 smarttab expandtab

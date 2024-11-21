@@ -35,8 +35,16 @@ def resolve_method(method):
     """
     Return a description of a method.
     """
+
     doc = inspect.getdoc(method)
-    return dict(__doc__=doc)
+    sig = None
+
+    try:
+        sig = str(inspect.signature(method))
+    except:
+        pass
+
+    return dict(__doc__=doc, __signature__=sig)
 
 
 def check_attribute(obj, d):
