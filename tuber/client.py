@@ -443,6 +443,7 @@ class SimpleTuberObject:
     """
 
     _context_class = SimpleContext
+    _tuber_objname = None
 
     def __init__(
         self,
