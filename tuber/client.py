@@ -67,10 +67,10 @@ def tuber_wrapper(func: callable, name: str, meta: "TuberResult"):
     Annotate the wrapper function with docstrings and signature.
     """
 
-    docstring = ''
+    docstring = ""
 
     # Begin with a function signature, if provided and valid
-    if (sig := getattr(meta, '__signature__', None)) and isinstance(sig, str):
+    if (sig := getattr(meta, "__signature__", None)) and isinstance(sig, str):
         docstring = f"{name}{sig}:\n\n"
 
     # Attach docstring, if provided and valid
