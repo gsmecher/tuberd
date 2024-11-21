@@ -62,37 +62,22 @@ def attribute_blacklisted(name: str):
     return False
 
 
-def tuber_wrapper(func: callable, meta: "TuberResult"):
+def tuber_wrapper(func: callable, name: str, meta: "TuberResult"):
     """
     Annotate the wrapper function with docstrings and signature.
     """
 
+    docstring = ""
+
+    # Begin with a function signature, if provided and valid
+    if (sig := getattr(meta, "__signature__", None)) and isinstance(sig, str):
+        docstring = f"{name}{sig}:\n\n"
+
     # Attach docstring, if provided and valid
-    try:
-        func.__doc__ = textwrap.dedent(meta.__doc__)
-    except:
-        pass
+    if (doc := getattr(meta, "__doc__", None)) and isinstance(doc, str):
+        docstring += textwrap.dedent(meta.__doc__)
 
-    # Attach a function signature, if provided and valid
-    try:
-        # build a dummy function to parse its signature with inspect
-        code = compile(f"def sigfunc{meta.__signature__}:\n pass", "sigfunc", "single")
-        exec(code, globals())
-        sig = inspect.signature(sigfunc)
-        params = list(sig.parameters.values())
-        p0 = params[0] if len(params) else None
-        # add self argument for unbound method
-        if not p0 or p0.name != "self":
-            if p0 and p0.kind == inspect.Parameter.POSITIONAL_ONLY:
-                kind = p0.kind
-            else:
-                kind = inspect.Parameter.POSITIONAL_OR_KEYWORD
-            parself = inspect.Parameter("self", kind)
-            sig = sig.replace(parameters=[parself] + params)
-        func.__signature__ = sig
-    except:
-        pass
-
+    func.__doc__ = docstring.strip()
     return func
 
 
@@ -458,6 +443,7 @@ class SimpleTuberObject:
     """
 
     _context_class = SimpleContext
+    _tuber_objname = None
 
     def __init__(
         self,
@@ -502,7 +488,7 @@ class SimpleTuberObject:
     def __iter__(self):
         try:
             return iter(self._items)
-        except AttributError:
+        except AttributeError:
             raise TypeError(f"'{self._tuber_objname}' object is not iterable")
 
     def object_factory(self, objname: str):
@@ -545,7 +531,7 @@ class SimpleTuberObject:
                 r = getattr(ctx, name)(*args, **kwargs)
             return r.result()
 
-        return tuber_wrapper(invoke, meta)
+        return tuber_wrapper(invoke, name, meta)
 
     def _resolve_object(
         self, attr: str | None = None, item: str | int | None = None, meta: "TuberResult" | None = None
@@ -677,7 +663,7 @@ class TuberObject(SimpleTuberObject):
                 results = await ctx()
             return results[0]
 
-        return tuber_wrapper(invoke, meta)
+        return tuber_wrapper(invoke, name, meta)
 
 
 # vim: sts=4 ts=4 sw=4 tw=78 smarttab expandtab

@@ -435,11 +435,7 @@ async def test_tuberpy_method_docstrings(resolve):
     """Ensure docstrings in C++ methods end up in the TuberObject's __doc__ dunder."""
 
     s = await resolve("Wrapper")
-    assert s.increment.__doc__.strip() == tm.Wrapper.increment.__doc__.split("\n", 1)[-1].strip()
-
-    # check signature
-    sig = inspect.signature(s.increment)
-    assert "x" in sig.parameters
+    assert s.increment.__doc__.strip() == tm.Wrapper.increment.__doc__.strip()
 
 
 @pytest.mark.asyncio
@@ -531,7 +527,6 @@ async def test_tuberpy_serialize_enum_class(resolve):
 
     # Ensure we can round-trip it back into C++
     r = await tuber_result(s.is_x(r))
-
     assert r is True
 
 

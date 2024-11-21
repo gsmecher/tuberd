@@ -26,16 +26,20 @@ class Wrapper {
 
 PYBIND11_MODULE(test_module, m) {
 
-	py::str_enum<Kind> kind(m, "Kind");
-	kind.value("X", Kind::X)
-		.value("Y", Kind::Y);
+	/* this forced scope ensures Kind is registered before it's used in
+	 * default arguments below. */
+	{
+		py::str_enum<Kind> kind(m, "Kind");
+		kind.value("X", Kind::X)
+			.value("Y", Kind::Y);
+	}
 
 	auto w = py::class_<Wrapper>(m, "Wrapper")
 		.def(py::init())
 		.def("return_x", &Wrapper::return_x)
 		.def("return_y", &Wrapper::return_y)
-		.def("is_x", &Wrapper::is_x)
-		.def("is_y", &Wrapper::is_y)
+		.def("is_x", &Wrapper::is_x, "k"_a=Kind::X)
+		.def("is_y", &Wrapper::is_y, "k"_a=Kind::Y)
 		.def("increment", &Wrapper::increment,
 				"x"_a,
 				"A function that increments each element in its argument list.")

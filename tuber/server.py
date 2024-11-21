@@ -35,20 +35,14 @@ def resolve_method(method):
     """
     Return a description of a method.
     """
+
     doc = inspect.getdoc(method)
     sig = None
+
     try:
         sig = str(inspect.signature(method))
     except:
-        # pybind docstrings include a signature as the first line
-        if doc and doc.startswith(method.__name__ + "("):
-            if "\n" in doc:
-                sig, doc = doc.split("\n", 1)
-                doc = doc.strip()
-            else:
-                sig = doc
-                doc = None
-            sig = "(" + sig.split("(", 1)[1]
+        pass
 
     return dict(__doc__=doc, __signature__=sig)
 
@@ -178,7 +172,6 @@ class TuberContainer:
         return out
 
     def __getattr__(self, name):
-        print("getattr", name)
         return getattr(self._items, name)
 
     def __len__(self):

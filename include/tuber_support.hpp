@@ -146,6 +146,20 @@ namespace PYBIND11_NAMESPACE {
 			object type = unique(ctor(**kwargs));
 			setattr(scope, name, type);
 			detail::type_caster<T>::bind(type, cpp_entries);
+
+			/* Add a custom __repr__ method that shows a string interpretation */
+			pybind11::setattr(type, "__repr__", pybind11::cpp_function(
+				[type](pybind11::object self) -> std::string {
+					T value = self.cast<T>();
+
+					for (const auto& item : type.attr("__members__").cast<pybind11::dict>())
+						if (item.second.cast<T>() == value)
+							return '"' + item.first.cast<std::string>() + '"';
+
+					return "UNKNOWN";
+				},
+				pybind11::is_method(type)
+			));
 		}
 
 		str_enum& value(const char* name, T value) & {
