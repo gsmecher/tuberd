@@ -511,11 +511,11 @@ class SimpleTuberObject:
                 r = getattr(ctx, name)(*args, **kwargs)
             return r.result()
 
-        if "__signature__" in meta:
+        if (sig := getattr(meta, '__signature__', None)):
             # This is a backwards compatibility shim to 0.16 and previous,
             # where docstrings were split into __signature__ and __doc__.
             # Turns out this is hard to do in a reliable and secure way.
-            invoke.__doc__ = f"{meta.__name__}{meta.__signature__}:\n{meta.__doc__}"
+            invoke.__doc__ = f"{name}{sig}:\n\n{meta.__doc__}"
         else:
             invoke.__doc__ = meta.__doc__
 
@@ -651,11 +651,11 @@ class TuberObject(SimpleTuberObject):
                 results = await ctx()
             return results[0]
 
-        if "__signature__" in meta:
+        if (sig := getattr(meta, '__signature__', None)):
             # This is a backwards compatibility shim to 0.16 and previous,
             # where docstrings were split into __signature__ and __doc__.
             # Turns out this is hard to do in a reliable and secure way.
-            invoke.__doc__ = f"{name}{meta.__signature__}:\n{meta.__doc__}"
+            invoke.__doc__ = f"{name}{sig}:\n\n{meta.__doc__}"
         else:
             invoke.__doc__ = meta.__doc__
 
