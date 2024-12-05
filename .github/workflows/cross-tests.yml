@@ -60,8 +60,8 @@ jobs:
       - name: Build client
         working-directory: client
         run: |
-          cmake -B build -DCMAKE_MODULE_PATH=/usr/local/share/cmake/Modules
-          cmake --build build
+          cmake -S client -B build -DCMAKE_MODULE_PATH=/usr/local/share/cmake/Modules
+          cmake --build client/build
 
       - name: Server checkout
         uses: actions/checkout@v4
@@ -79,8 +79,8 @@ jobs:
       - name: Build server
         working-directory: server
         run: |
-          cmake -B build -DCMAKE_MODULE_PATH=/usr/local/share/cmake/Modules
-          cmake --build build
+          cmake -S server -B build -DCMAKE_MODULE_PATH=/usr/local/share/cmake/Modules
+          cmake --build server/build
 
       - name: Test
         working-directory: client/build
