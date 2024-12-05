@@ -29,9 +29,6 @@ jobs:
           ref: 0.19.0
           path: libhttpserver
 
-      - name: Install Python dependencies
-        uses: py-actions/py-dependency-install@v4
-
       - name: Install C++ dependencies
         run: |
           sudo apt-get update
@@ -62,6 +59,16 @@ jobs:
           ref: ${{ matrix.server_version != 'current'
                    && matrix.server_version
                    || github.ref_name }}
+
+      - name: Install client Python dependencies
+        uses: py-actions/py-dependency-install@v4
+        with:
+          path: "client/requirements.txt"
+
+      - name: Install server Python dependencies
+        uses: py-actions/py-dependency-install@v4
+        with:
+          path: "server/requirements.txt"
 
       - name: Build client
         working-directory: client
