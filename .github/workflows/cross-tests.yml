@@ -1,0 +1,80 @@
+name: Cross version tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+env:
+  CC: gcc-10
+  CXX: g++-10
+  LD_LIBRARY_PATH: /usr/local/lib # this is where libhttpserver installs itself
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        client_version: ["v0.15", "v0.16", "master"]
+        server_version: ["v0.15", "v0.16", "master"]
+
+    steps:
+
+      - name: Check out libhttpserver dependency
+        uses: actions/checkout@v4
+        with:
+          repository: etr/libhttpserver
+          ref: 0.19.0
+          path: libhttpserver
+
+      - name: Install Python dependencies
+        uses: py-actions/py-dependency-install@v4
+
+      - name: Install C++ dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libmicrohttpd-dev pybind11-dev
+
+      - name: Build and install libhttpserver
+        run: |
+          cd libhttpserver
+          ./bootstrap
+          mkdir build
+          cd build
+          ../configure
+          make
+          sudo make install
+
+      - name: Client checkout
+        uses: actions/checkout@v4
+        with:
+          path: client
+          ref: ${{ matrix.client_version != 'current'
+                   && matrix.client_version
+                   || github.ref_name }}
+
+      - name: Server checkout
+        uses: actions/checkout@v4
+        with:
+          path: client
+          ref: ${{ matrix.server_version != 'current'
+                   && matrix.server_version
+                   || github.ref_name }}
+
+      - name: Build client
+        working-directory: client
+        run: |
+          cmake -B build -DCMAKE_MODULE_PATH=/usr/local/share/cmake/Modules
+          cmake --build build
+
+      - name: Build server
+        working-directory: server
+        run: |
+          cmake -B build -DCMAKE_MODULE_PATH=/usr/local/share/cmake/Modules
+          cmake --build build
+
+      - name: Test
+        working-directory: client/build
+        run: ctest --verbose
