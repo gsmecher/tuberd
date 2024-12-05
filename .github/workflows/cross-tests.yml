@@ -51,8 +51,8 @@ jobs:
           ref: >
             ${{
               matrix.client_version == 'current' &&
-                (github.event_name == 'pull_request' && 'refs/pull/' + github.event.pull_request.number + '/merge' || github.ref_name) ||
-                matrix.client_version
+              (github.event_name == 'pull_request' && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.ref_name) ||
+              matrix.client_version
             }}
 
       - name: Install client Python dependencies
@@ -72,8 +72,8 @@ jobs:
           path: server
             ${{
               matrix.server_version == 'current' &&
-                (github.event_name == 'pull_request' && 'refs/pull/' + github.event.pull_request.number + '/merge' || github.ref_name) ||
-                matrix.server_version
+              (github.event_name == 'pull_request' && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.ref_name) ||
+              matrix.server_version
             }}
 
       - name: Install server Python dependencies
