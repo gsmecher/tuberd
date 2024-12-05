@@ -17,8 +17,8 @@ jobs:
 
     strategy:
       matrix:
-        client_version: ["v0.15", "v0.16", "master"]
-        server_version: ["v0.15", "v0.16", "master"]
+        client_version: ["v0.15", "v0.16", "current"]
+        server_version: ["v0.15", "v0.16", "current"]
 
     steps:
 
@@ -52,29 +52,29 @@ jobs:
                    && matrix.client_version
                    || github.ref_name }}
 
-      - name: Server checkout
-        uses: actions/checkout@v4
-        with:
-          path: client
-          ref: ${{ matrix.server_version != 'current'
-                   && matrix.server_version
-                   || github.ref_name }}
-
       - name: Install client Python dependencies
         uses: py-actions/py-dependency-install@v4
         with:
           path: "client/requirements.txt"
-
-      - name: Install server Python dependencies
-        uses: py-actions/py-dependency-install@v4
-        with:
-          path: "server/requirements.txt"
 
       - name: Build client
         working-directory: client
         run: |
           cmake -B build -DCMAKE_MODULE_PATH=/usr/local/share/cmake/Modules
           cmake --build build
+
+      - name: Server checkout
+        uses: actions/checkout@v4
+        with:
+          path: server
+          ref: ${{ matrix.server_version != 'current'
+                   && matrix.server_version
+                   || github.ref_name }}
+
+      - name: Install server Python dependencies
+        uses: py-actions/py-dependency-install@v4
+        with:
+          path: "server/requirements.txt"
 
       - name: Build server
         working-directory: server
