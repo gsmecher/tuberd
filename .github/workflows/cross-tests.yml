@@ -30,9 +30,10 @@ jobs:
           path: libhttpserver
 
       - name: Install C++ dependencies
+        # libfmt-dev is a deprecated requirement kept for v0.15 and earlier
         run: |
           sudo apt-get update
-          sudo apt-get install -y libmicrohttpd-dev pybind11-dev
+          sudo apt-get install -y libmicrohttpd-dev pybind11-dev libfmt-dev
 
       - name: Build and install libhttpserver
         run: |
