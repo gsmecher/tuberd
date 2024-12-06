@@ -70,6 +70,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: server
+          ref: >
             ${{
               matrix.server_version == 'current' &&
               (github.event_name == 'pull_request' && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.ref_name) ||
