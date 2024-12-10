@@ -40,11 +40,60 @@ def resolve_method(method):
     sig = None
 
     try:
-        sig = str(inspect.signature(method))
+        sig = inspect.signature(method)
     except:
-        pass
+        # pybind docstrings include a signature as the first line
+        if doc and doc.startswith(method.__name__ + "("):
+            if "\n" in doc:
+                sig, doc = doc.split("\n", 1)
+                doc = doc.strip()
+            else:
+                sig = doc
+                doc = None
+            sig = "(" + sig.split("(", 1)[1]
 
-    return dict(__doc__=doc, __signature__=sig)
+    out = dict(__doc__=doc)
+
+    if isinstance(sig, str):
+        try:
+            # build a dummy function to parse its signature with inspect
+            code = compile(f"def sigfunc{sig}:\n pass", "sigfunc", "single")
+            exec(code, globals())
+            sig = inspect.signature(sigfunc)
+            params = list(sig.parameters.values())
+            p0 = params[0] if len(params) else None
+            # add self argument for unbound method
+            if not p0 or p0.name != "self":
+                if p0 and p0.kind == inspect.Parameter.POSITIONAL_ONLY:
+                    kind = p0.kind
+                else:
+                    kind = inspect.Parameter.POSITIONAL_OR_KEYWORD
+                parself = inspect.Parameter("self", kind)
+                sig = sig.replace(parameters=[parself] + params)
+        except:
+            sig = None
+
+    if sig is not None:
+        # parse signature parameters
+        annotations = {}
+        if sig.return_annotation != sig.empty:
+            annotations["return"] = str(sig.return_annotation)
+
+        args = []
+        kwargs = {}
+        for name, par in sig.parameters.items():
+            if par.default == par.empty:
+                args.append(par.name)
+            else:
+                kwargs[par.name] = par.default
+            if par.annotation != par.empty:
+                annotations[par.name] = str(par.annotation)
+
+        out["args"] = args
+        out["kwargs"] = kwargs
+        out["annotations"] = annotations
+
+    return out
 
 
 def check_attribute(obj, d):

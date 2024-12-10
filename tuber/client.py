@@ -62,22 +62,40 @@ def attribute_blacklisted(name: str):
     return False
 
 
-def tuber_wrapper(func: callable, name: str, meta: TuberResult):
+def tuber_wrapper(func: callable, meta: TuberResult):
     """
     Annotate the wrapper function with docstrings and signature.
     """
 
-    docstring = ""
-
-    # Begin with a function signature, if provided and valid
-    if (sig := getattr(meta, "__signature__", None)) and isinstance(sig, str):
-        docstring = f"{name}{sig}:\n\n"
-
     # Attach docstring, if provided and valid
-    if (doc := getattr(meta, "__doc__", None)) and isinstance(doc, str):
-        docstring += textwrap.dedent(meta.__doc__)
+    try:
+        func.__doc__ = textwrap.dedent(meta.__doc__)
+    except:
+        pass
 
-    func.__doc__ = docstring.strip()
+    # Attach a function signature, if provided and valid
+    empty = inspect.Parameter.empty
+
+    def P(name, default=empty):
+        return inspect.Parameter(
+            name,
+            inspect.Parameter.POSITIONAL_OR_KEYWORD,
+            default=default,
+            annotation=getattr(meta.annotations, name, empty),
+        )
+
+    try:
+        params = []
+        for arg in meta.args:
+            params.append(P(arg))
+        for k in meta.kwargs:
+            params.append(P(k, getattr(meta.kwargs, k)))
+        ret = getattr(meta.annotations, "return", empty)
+        sig = inspect.Signature(params, return_annotation=ret)
+        func.__signature__ = sig
+    except:
+        pass
+
     return func
 
 
@@ -443,7 +461,6 @@ class SimpleTuberObject:
     """
 
     _context_class = SimpleContext
-    _tuber_objname = None
 
     def __init__(
         self,
@@ -531,7 +548,7 @@ class SimpleTuberObject:
                 r = getattr(ctx, name)(*args, **kwargs)
             return r.result()
 
-        return tuber_wrapper(invoke, name, meta)
+        return tuber_wrapper(invoke, meta)
 
     def _resolve_object(self, attr: str | None = None, item: str | int | None = None, meta: TuberResult | None = None):
         """Create a TuberObject representing the given attribute or container
@@ -689,7 +706,7 @@ class TuberObject(SimpleTuberObject):
                 results = await ctx()
             return results[0]
 
-        return tuber_wrapper(invoke, name, meta)
+        return tuber_wrapper(invoke, meta)
 
 
 # vim: sts=4 ts=4 sw=4 tw=78 smarttab expandtab
