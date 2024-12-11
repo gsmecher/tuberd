@@ -44,6 +44,71 @@ request = {
 }
 
 """
+Metadata schema (resolved only)
+"""
+
+metadata_method = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "method metadata",
+    "type": "object",
+    "properties": {
+        "__doc__": {
+            "oneOf": [
+                {"type": "string"},
+                {"type": "null"},
+            ],
+        },
+        # argument descriptor goes here
+    },
+    "additionalProperties": True,
+}
+
+# Description of an object
+metadata_object = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "object metadata",
+    "type": "object",
+    "properties": {
+        "__doc__": {"type": ["string", "null"]},
+        "properties": {"type": "object"},
+        "methods": {
+            "type": "object",
+            "additionalProperties": metadata_method,
+        },
+        "keys": {
+            "oneOf": [
+                {"type": "array"},
+                {"type": "integer"},
+            ],
+        },
+        "values": {
+            "oneOf": [
+                {"type": "array"},
+                {"type": "object"},
+            ],
+        },
+        "objects": {
+            "oneOf": [
+                {"type": "object"},
+                {"type": "null"},
+            ],
+        },
+    },
+    "additionalProperties": False,
+}
+
+# Root metadata, when no object/method/property has been specified
+metadata_root = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "root metadata",
+    "type": "object",
+    "properties": {
+        "objects": metadata_object,
+        "additionalProperties": False,
+    },
+}
+
+"""
 Response schema
 """
 
@@ -51,38 +116,6 @@ response_warnings = {
     "type": "array",
     "items": {
         "type": "string",
-    },
-}
-
-metadata_old = {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "type": "array",
-}
-
-metadata_recursive = {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "type": "object",
-    "additionalProperties": {
-        "type": "object",
-        "properties": {
-            "__doc__": {"type": ["string", "null"]},
-            "objects": {"type": "object"},
-            "properties": {"type": "object"},
-            "methods": {"type": "object"},
-            "keys": {
-                "oneOf": [
-                    {"type": "array"},
-                    {"type": "integer"},
-                ],
-            },
-            "values": {
-                "oneOf": [
-                    {"type": "array"},
-                    {"type": "object"},
-                ],
-            },
-        },
-        "additionalProperties": False,
     },
 }
 

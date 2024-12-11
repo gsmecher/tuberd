@@ -579,10 +579,9 @@ class RequestHandler:
             # registry metadata
             if resolve:
                 objects = {obj: resolve_object(self.registry[obj]) for obj in self.registry}
-                self.validate(objects, schema.metadata_recursive)
+                self.validate(objects, schema.metadata_root)
             else:
                 objects = list(self.registry)
-                self.validate(objects, schema.metadata_old)
 
             return result_response(objects=objects)
 
@@ -590,7 +589,10 @@ class RequestHandler:
 
         if not methodname and not propertyname:
             # Object metadata.
-            return result_response(**resolve_object(obj, recursive=resolve))
+            obj_meta = resolve_object(obj, recursive=resolve)
+            if resolve:
+                self.validate(obj_meta, schema.metadata_object)
+            return result_response(**obj_meta)
 
         if propertyname:
             # Sanity check
