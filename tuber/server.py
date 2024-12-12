@@ -97,6 +97,9 @@ def check_attribute(obj, d):
     """
     if d.startswith("__"):
         return False
+    if d.startswith("_pybind11"):
+        # pybind11 internals - e.g. _pybind11_conduit_v1_
+        return False
     if d in getattr(obj, "__tuber_exclude__", []):
         return False
     for c in obj.__class__.mro():
