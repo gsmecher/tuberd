@@ -74,25 +74,11 @@ def tuber_wrapper(func: callable, meta: TuberResult):
         pass
 
     # Attach a function signature, if provided and valid
-    empty = inspect.Parameter.empty
-
-    def P(name, default=empty):
-        return inspect.Parameter(
-            name,
-            inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            default=default,
-            annotation=getattr(meta.annotations, name, empty),
-        )
-
     try:
-        params = []
-        for arg in meta.args:
-            params.append(P(arg))
-        for k in meta.kwargs:
-            params.append(P(k, getattr(meta.kwargs, k)))
-        ret = getattr(meta.annotations, "return", empty)
-        sig = inspect.Signature(params, return_annotation=ret)
-        func.__signature__ = sig
+        func.__signature__ = inspect.Signature(
+            [inspect.Parameter(**vars(par)) for par in meta.parameters],
+            return_annotation=getattr(meta, "return_annotation", inspect.Signature.empty),
+        )
     except:
         pass
 

@@ -75,23 +75,18 @@ def resolve_method(method):
 
     if sig is not None:
         # parse signature parameters
-        annotations = {}
         if sig.return_annotation != sig.empty:
-            annotations["return"] = str(sig.return_annotation)
+            out["return_annotation"] = str(sig.return_annotation)
 
-        args = []
-        kwargs = {}
+        params = []
         for name, par in sig.parameters.items():
-            if par.default == par.empty:
-                args.append(par.name)
-            else:
-                kwargs[par.name] = par.default
+            p = {"name": name, "kind": int(par.kind)}
+            if par.default != par.empty:
+                p["default"] = par.default
             if par.annotation != par.empty:
-                annotations[par.name] = str(par.annotation)
-
-        out["args"] = args
-        out["kwargs"] = kwargs
-        out["annotations"] = annotations
+                p["annotation"] = str(par.annotation)
+            params.append(p)
+        out["parameters"] = params
 
     return out
 
