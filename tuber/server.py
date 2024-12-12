@@ -74,9 +74,11 @@ def resolve_method(method):
             sig = None
 
     if sig is not None:
+        sout = {}
+
         # parse signature parameters
         if sig.return_annotation != sig.empty:
-            out["return_annotation"] = str(sig.return_annotation)
+            sout["return_annotation"] = str(sig.return_annotation)
 
         params = []
         for name, par in sig.parameters.items():
@@ -86,7 +88,8 @@ def resolve_method(method):
             if par.annotation != par.empty:
                 p["annotation"] = str(par.annotation)
             params.append(p)
-        out["parameters"] = params
+        sout["parameters"] = params
+        out["__signature__"] = sout
 
     return out
 
