@@ -44,6 +44,83 @@ request = {
 }
 
 """
+Metadata schema (resolved only)
+"""
+
+metadata_method = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "method metadata",
+    "type": "object",
+    "properties": {
+        "__doc__": {"oneOf": [{"type": "string"}, {"type": "null"}]},
+        "__signature__": {
+            "type": "object",
+            "properties": {
+                "parameters": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "annotation": {"type": "string"},
+                            "kind": {"type": "number"},
+                            "name": {"type": "string"},
+                            "default": {"type": ["string", "number", "object", "array", "boolean", "null"]},
+                        },
+                        "additionalProperties": False,
+                    },
+                },
+                "return_annotation": {"type": "string"},
+            },
+            "additionalProperties": False,
+        },
+        # argument descriptor goes here
+    },
+    "additionalProperties": False,
+}
+
+# Description of an object
+metadata_object = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "object metadata",
+    "type": "object",
+    "properties": {
+        "__doc__": {"type": ["string", "null"]},
+        "properties": {"type": "object"},
+        "methods": {
+            "type": "object",
+            "additionalProperties": metadata_method,
+        },
+        "keys": {
+            "oneOf": [
+                {"type": "array"},
+                {"type": "integer"},
+            ],
+        },
+        "values": {
+            "oneOf": [
+                {"type": "array"},
+                {"type": "object"},
+            ],
+        },
+        "objects": {
+            "oneOf": [
+                {"type": "object"},
+                {"type": "null"},
+            ],
+        },
+    },
+    "additionalProperties": False,
+}
+
+# Root metadata, when no object/method/property has been specified
+metadata_root = {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "root metadata",
+    "type": "object",
+    "additionalProperties": metadata_object,
+}
+
+"""
 Response schema
 """
 
@@ -51,38 +128,6 @@ response_warnings = {
     "type": "array",
     "items": {
         "type": "string",
-    },
-}
-
-metadata_old = {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "type": "array",
-}
-
-metadata_recursive = {
-    "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "type": "object",
-    "additionalProperties": {
-        "type": "object",
-        "properties": {
-            "__doc__": {"type": ["string", "null"]},
-            "objects": {"type": "object"},
-            "properties": {"type": "object"},
-            "methods": {"type": "object"},
-            "keys": {
-                "oneOf": [
-                    {"type": "array"},
-                    {"type": "integer"},
-                ],
-            },
-            "values": {
-                "oneOf": [
-                    {"type": "array"},
-                    {"type": "object"},
-                ],
-            },
-        },
-        "additionalProperties": False,
     },
 }
 

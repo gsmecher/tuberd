@@ -40,11 +40,58 @@ def resolve_method(method):
     sig = None
 
     try:
-        sig = str(inspect.signature(method))
+        sig = inspect.signature(method)
     except:
-        pass
+        # pybind docstrings include a signature as the first line
+        if doc and doc.startswith(method.__name__ + "("):
+            if "\n" in doc:
+                sig, doc = doc.split("\n", 1)
+                doc = doc.strip()
+            else:
+                sig = doc
+                doc = None
+            sig = "(" + sig.split("(", 1)[1]
 
-    return dict(__doc__=doc, __signature__=sig)
+    out = dict(__doc__=doc)
+
+    if isinstance(sig, str):
+        try:
+            # build a dummy function to parse its signature with inspect
+            code = compile(f"def sigfunc{sig}:\n pass", "sigfunc", "single")
+            exec(code, globals())
+            sig = inspect.signature(sigfunc)
+            params = list(sig.parameters.values())
+            p0 = params[0] if len(params) else None
+            # add self argument for unbound method
+            if not p0 or p0.name != "self":
+                if p0 and p0.kind == inspect.Parameter.POSITIONAL_ONLY:
+                    kind = p0.kind
+                else:
+                    kind = inspect.Parameter.POSITIONAL_OR_KEYWORD
+                parself = inspect.Parameter("self", kind)
+                sig = sig.replace(parameters=[parself] + params)
+        except:
+            sig = None
+
+    if sig is not None:
+        sout = {}
+
+        # parse signature parameters
+        if sig.return_annotation != sig.empty:
+            sout["return_annotation"] = str(sig.return_annotation)
+
+        params = []
+        for name, par in sig.parameters.items():
+            p = {"name": name, "kind": int(par.kind)}
+            if par.default != par.empty:
+                p["default"] = par.default
+            if par.annotation != par.empty:
+                p["annotation"] = str(par.annotation)
+            params.append(p)
+        sout["parameters"] = params
+        out["__signature__"] = sout
+
+    return out
 
 
 def check_attribute(obj, d):
@@ -52,6 +99,9 @@ def check_attribute(obj, d):
     Return True if the given attribute is safe to resolve, False otherwise.
     """
     if d.startswith("__"):
+        return False
+    if d.startswith("_pybind11"):
+        # pybind11 internals - e.g. _pybind11_conduit_v1_
         return False
     if d in getattr(obj, "__tuber_exclude__", []):
         return False
@@ -530,10 +580,9 @@ class RequestHandler:
             # registry metadata
             if resolve:
                 objects = {obj: resolve_object(self.registry[obj]) for obj in self.registry}
-                self.validate(objects, schema.metadata_recursive)
+                self.validate(objects, schema.metadata_root)
             else:
                 objects = list(self.registry)
-                self.validate(objects, schema.metadata_old)
 
             return result_response(objects=objects)
 
@@ -541,7 +590,10 @@ class RequestHandler:
 
         if not methodname and not propertyname:
             # Object metadata.
-            return result_response(**resolve_object(obj, recursive=resolve))
+            obj_meta = resolve_object(obj, recursive=resolve)
+            if resolve:
+                self.validate(obj_meta, schema.metadata_object)
+            return result_response(**obj_meta)
 
         if propertyname:
             # Sanity check
