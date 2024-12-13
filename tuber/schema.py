@@ -52,15 +52,30 @@ metadata_method = {
     "title": "method metadata",
     "type": "object",
     "properties": {
-        "__doc__": {
-            "oneOf": [
-                {"type": "string"},
-                {"type": "null"},
-            ],
+        "__doc__": {"oneOf": [{"type": "string"}, {"type": "null"}]},
+        "__signature__": {
+            "type": "object",
+            "properties": {
+                "parameters": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "annotation": {"type": "string"},
+                            "kind": {"type": "number"},
+                            "name": {"type": "string"},
+                            "default": {"type": ["string", "number", "object", "array", "boolean", "null"]},
+                        },
+                        "additionalProperties": False,
+                    },
+                },
+                "return_annotation": {"type": "string"},
+            },
+            "additionalProperties": False,
         },
         # argument descriptor goes here
     },
-    "additionalProperties": True,
+    "additionalProperties": False,
 }
 
 # Description of an object
@@ -102,10 +117,7 @@ metadata_root = {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "title": "root metadata",
     "type": "object",
-    "properties": {
-        "objects": metadata_object,
-        "additionalProperties": False,
-    },
+    "additionalProperties": metadata_object,
 }
 
 """
