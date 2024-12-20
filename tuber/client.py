@@ -366,8 +366,13 @@ class Context(SimpleContext):
             # hide import for non-library package that may not be invoked
             import aiohttp
 
+            # AsyncResolver does not support mDNS
+            resolver = aiohttp.resolver.ThreadedResolver()
+
             # Monkey-patch tuber session memory handling with the running event loop
-            loop._tuber_session = aiohttp.ClientSession(json_serialize=Codecs["json"].encode)
+            loop._tuber_session = aiohttp.ClientSession(
+                json_serialize=Codecs["json"].encode, connector=aiohttp.TCPConnector(resolver=resolver)
+            )
 
             # Ensure that ClientSession.close() is called when the loop is
             # closed.  ClientSession.__del__ does not close the session, so it
