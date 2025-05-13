@@ -376,7 +376,7 @@ class RequestHandler:
         try:
             self.codecs["application/cbor"] = Codecs["cbor"]
         except Exception as e:
-            warnings.warn(f"Unable to import cbor codec ({str(e)})")
+            pass
 
         assert default_format in self.codecs, f"Missing codec for {default_format}"
         self.default_format = default_format
