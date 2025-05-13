@@ -279,6 +279,8 @@ class SimpleContext:
             # We made an array request, and received an object response
             # because of an exception-catching scope in the server. Do the
             # best we can.
+            for f in futures:
+                f.cancel()
             raise TuberRemoteError(json_out.error.message)
 
         for f, r in zip(futures, json_out):
@@ -419,6 +421,8 @@ class Context(SimpleContext):
             # We made an array request, and received an object response
             # because of an exception-catching scope in the server. Do the
             # best we can.
+            for f in futures:
+                f.cancel()
             raise TuberRemoteError(json_out.error.message)
 
         # Resolve futures
