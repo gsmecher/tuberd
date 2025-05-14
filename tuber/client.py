@@ -212,7 +212,7 @@ class SimpleContext:
         self.calls.append((request, future))
         return future
 
-    def send(self, continue_on_error: bool = False):
+    def send(self, return_exceptions: bool = False):
         """Break off a set of calls and return them for execution."""
 
         # An empty Context returns an empty list of calls
@@ -238,24 +238,34 @@ class SimpleContext:
 
         # Declare the media types we want to allow getting back
         headers = {"Accept": ", ".join(self.accept_types)}
-        if continue_on_error:
+        if return_exceptions:
             headers["X-Tuber-Options"] = "continue-on-error"
 
         # Create a HTTP request to complete the call.
         # Returns a Future whose result has been processed by the response hook.
-        return cs.post(self.uri, json=calls, headers=headers, hooks={"response": self._response_hook(futures)})
+        return cs.post(
+            self.uri,
+            json=calls,
+            headers=headers,
+            hooks={"response": self._response_hook(futures, return_exceptions)},
+        )
 
-    def _response_hook(self, futures: list["concurrent.futures.Future"]):
+    def _response_hook(self, futures: list["concurrent.futures.Future"], return_exceptions: bool = False):
         """Hook function for parsing a response from the server into a list of futures for each context call"""
 
         def hook(r, *args, **kwargs):
-            results = self._receive(r, futures)
+            results = self._receive(r, futures, return_exceptions)
             r.tuber_results = results
             return r
 
         return hook
 
-    def _receive(self, response: "requests.Response", futures: list["concurrent.futures.Future"]):
+    def _receive(
+        self,
+        response: "requests.Response",
+        futures: list["concurrent.futures.Future"],
+        return_exceptions: bool = False,
+    ):
         """Parse response from a previously sent HTTP request."""
 
         with response as resp:
@@ -302,6 +312,15 @@ class SimpleContext:
                     f.set_exception(TuberError("Result has no 'result' attribute"))
 
         # Return a list of results
+        if return_exceptions:
+            out = []
+            for f in futures:
+                try:
+                    out.append(f.result())
+                except Exception as e:
+                    out.append(e)
+            return out
+
         return [f.result() for f in futures]
 
     def receive(self, response: "concurrent.futures.Future"):
@@ -310,9 +329,9 @@ class SimpleContext:
             return []
         return response.result().tuber_results
 
-    def __call__(self, continue_on_error: bool = False):
+    def __call__(self, return_exceptions: bool = False):
         """Wait for any pending calls to complete and return the results from the server"""
-        resp = self.send(continue_on_error=continue_on_error)
+        resp = self.send(return_exceptions=return_exceptions)
         return self.receive(resp)
 
 
@@ -348,7 +367,7 @@ class Context(SimpleContext):
         self.calls.append((request, future))
         return future
 
-    async def __call__(self, continue_on_error: bool = False):
+    async def __call__(self, return_exceptions: bool = False):
         """Break off a set of calls and return them for execution."""
 
         # An empty Context returns an empty list of calls
@@ -395,7 +414,7 @@ class Context(SimpleContext):
 
         # Declare the media types we want to allow getting back
         headers = {"Accept": ", ".join(self.accept_types)}
-        if continue_on_error:
+        if return_exceptions:
             headers["X-Tuber-Options"] = "continue-on-error"
         # Create a HTTP request to complete the call. This is a coroutine,
         # so we queue the call and then suspend execution (via 'yield')
@@ -445,6 +464,15 @@ class Context(SimpleContext):
                     f.set_exception(TuberError("Result has no 'result' attribute"))
 
         # Return a list of results
+        if return_exceptions:
+            out = []
+            for f in futures:
+                try:
+                    out.append(await f)
+                except Exception as e:
+                    out.append(e)
+            return out
+
         return [await f for f in futures]
 
 

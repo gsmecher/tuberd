@@ -621,9 +621,9 @@ def test_tuberpy_fake_async(accept_types, tuberd_host):
     assert r2 == Types.INTEGER
 
 
-@pytest.mark.parametrize("continue_on_error", [True, False])
+@pytest.mark.parametrize("return_exceptions", [True, False])
 @pytest.mark.asyncio
-async def test_tuberpy_continue_errors(continue_on_error, resolve):
+async def test_tuberpy_return_exceptions(return_exceptions, resolve):
     """Ensure errors are turned into warnings"""
     s = await resolve()
 
@@ -632,7 +632,7 @@ async def test_tuberpy_continue_errors(continue_on_error, resolve):
             r1 = ctx.Wrapper.increment([1, 2, 3])  # fine
             r2 = ctx.Warnings.single_warning("This is a warning", error=True)
             r3 = ctx.Wrapper.increment([5, 6, 6])  # should still execute
-            if not continue_on_error:
+            if not return_exceptions:
                 with pytest.raises(tuber.TuberRemoteError):
                     await ctx()
                 with pytest.raises(tuber.TuberRemoteError):
@@ -641,18 +641,18 @@ async def test_tuberpy_continue_errors(continue_on_error, resolve):
                     await tuber_result(r3)
 
             else:
-                try:
-                    await ctx(continue_on_error=True)
-                except tuber.TuberRemoteError:
-                    pass
+                [r1b, r2b, r3b] = await ctx(return_exceptions=True)
                 with pytest.raises(tuber.TuberRemoteError):
                     await tuber_result(r2)
                 r3 = await tuber_result(r3)
 
     r1 = await tuber_result(r1)
     assert r1 == [2, 3, 4]
-    if continue_on_error:
+    if return_exceptions:
+        assert r1b == [2, 3, 4]
         assert r3 == [6, 7, 7]
+        assert r3b == [6, 7, 7]
+        assert isinstance(r2b, tuber.TuberRemoteError)
 
 
 @pytest.mark.asyncio
