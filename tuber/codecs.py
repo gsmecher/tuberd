@@ -1,6 +1,7 @@
 from collections.abc import Sequence, Mapping
 from collections import namedtuple
 import sys
+import functools
 
 try:
     import numpy
@@ -42,6 +43,43 @@ class TuberResult:
     def __repr__(self):
         "Return a concise representation string"
         return repr(self.__dict__)
+
+    def __getitem__(self, objname):
+        """
+        Extract an item from this object for the given name.
+
+        The object may be a simple string name for an object attribute, or a list
+        path specifying the attributes and/or items to access.  For example, the
+        trivial object:
+
+            >>> class SomeObject: LIST = [1, 2, 3, 4]
+            >>> r = TuberResult(dict(cls=SomeObject()))
+
+        ...can be navigated as follows:
+
+            >>> r.cls.LIST[0]
+            1
+
+        ...equivalently
+
+            >>> r["cls", ("LIST", 0)]
+            1
+        """
+        try:
+            # simple object
+            if isinstance(objname, str):
+                return getattr(self, objname)
+
+            # object traversal
+            objname = [[x] if isinstance(x, str) else x for x in objname]
+
+            def agetter(obj, attr, *items):
+                return functools.reduce(lambda o, i: o[i], items, getattr(obj, attr))
+
+            return functools.reduce(lambda obj, x: agetter(obj, *x), objname, self)
+
+        except Exception as e:
+            raise e.__class__(f"{str(e)} (Invalid object name '{objname}')")
 
 
 def wrap_bytes_for_json(obj):
