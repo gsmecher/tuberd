@@ -4,8 +4,9 @@ from __future__ import annotations
 import inspect
 import os
 import warnings
+import functools
 
-from .codecs import Codecs, TuberResult
+from .codecs import Codecs
 from . import schema
 
 __all__ = ["TuberRegistry", "TuberContainer", "TuberArray", "run", "main"]
@@ -264,7 +265,7 @@ class TuberArray(TuberContainer):
         return {"keys": keys, "values": resolve_object(value)}
 
 
-class TuberRegistry(TuberResult):
+class TuberRegistry:
     """
     Registry class.
     """
@@ -296,6 +297,47 @@ class TuberRegistry(TuberResult):
 
         for k, v in kwargs.items():
             setattr(self, k, v)
+
+    def __iter__(self):
+        return iter(self.__dict__)
+
+    def __getitem__(self, objname):
+        """
+        Extract an object from the registry for the given name.
+
+        The object name may be a simple string name for the registry entry, or
+        a list path specifying the attributes and/or items to access.  For
+        example, the trivial registry:
+
+            >>> class SomeObject: LIST = [1, 2, 3, 4]
+            >>> r = TuberRegistry(Class=SomeObject())
+
+        ...can be navigated as follows:
+
+            >>> r.Class.LIST[0]
+            1
+
+        ...equivalently
+
+            >>> r['Class', ('LIST', 0)]
+            1
+        """
+
+        try:
+            # simple object
+            if isinstance(objname, str):
+                return getattr(self, objname)
+
+            # object traversal
+            objname = [[x] if isinstance(x, str) else x for x in objname]
+
+            def agetter(obj, attr, *items):
+                return functools.reduce(lambda o, i: o[i], items, getattr(obj, attr))
+
+            return functools.reduce(lambda obj, x: agetter(obj, *x), objname, self)
+
+        except Exception as e:
+            raise e.__class__(f"{str(e)} (Invalid object name '{objname}')")
 
 
 class RequestHandler:
