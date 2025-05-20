@@ -274,12 +274,16 @@ class SimpleContext:
         return_dicts: bool = False,
     ):
         if return_dicts:
+
             def haskey(d, k):
                 return isinstance(d, dict) and k in d
+
             def getkey(d, *k):
                 return functools.reduce(lambda d, k: d[k], k, d)
+
         else:
             haskey = hasattr
+
             def getkey(d, *k):
                 return functools.reduce(lambda d, k: getattr(d, k), k, d)
 
@@ -346,9 +350,7 @@ class SimpleContext:
             # this is slightly more liberal than checking that it is really among those we declared
             if content_type not in AcceptTypes:
                 raise TuberError(f"Unexpected response content type: {content_type}")
-            json_out = AcceptTypes[content_type](
-                raw_out, resp.apparent_encoding, return_dicts=return_dicts
-            )
+            json_out = AcceptTypes[content_type](raw_out, resp.apparent_encoding, return_dicts=return_dicts)
 
         return self._parse_json(json_out, futures, return_exceptions, return_dicts)
 
