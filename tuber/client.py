@@ -299,7 +299,7 @@ class SimpleContext:
 
         for f, r in zip(futures, json_out):
             # Always emit warnings, if any occurred
-            if hasattr(r, "warnings") and getkey(r, "warnings"):
+            if haskey(r, "warnings") and getkey(r, "warnings"):
                 for w in getkey(r, "warnings"):
                     warnings.warn(w)
 
