@@ -43,10 +43,6 @@ class TuberResult:
         "Return a concise representation string"
         return repr(self.__dict__)
 
-    def __getitem__(self, item):
-        "Return a value by key"
-        return self.__dict__[item]
-
 
 def wrap_bytes_for_json(obj):
     """
@@ -197,7 +193,7 @@ if have_orjson:
     Codecs["orjson"] = Codec(decode=decode_orjson, encode=encode_orjson)
 
 
-def decode_json_client(response_data, encoding):
+def decode_json_client(response_data, encoding, return_dicts=False):
     if encoding is None:  # guess the typical default if unspecified
         encoding = "utf-8"
 
@@ -207,6 +203,8 @@ def decode_json_client(response_data, encoding):
                 return bytes(obj["bytes"])
             except e as ValueError:
                 pass
+        if return_dicts:
+            return obj
         return TuberResult(obj)
 
     return decode_json(response_data.decode(encoding), object_hook=ohook)
@@ -226,7 +224,9 @@ if have_cbor:
 
     Codecs["cbor"] = Codec(decode=decode_cbor, encode=encode_cbor)
 
-    def decode_cbor_client(response_data, encoding):
+    def decode_cbor_client(response_data, encoding, return_dicts=False):
+        if return_dicts:
+            return decode_cbor(response_data)
         return decode_cbor(response_data, object_hook=lambda dec, data: TuberResult(data))
 
     AcceptTypes["application/cbor"] = decode_cbor_client

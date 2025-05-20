@@ -9,6 +9,7 @@ import textwrap
 import types
 import warnings
 import inspect
+import functools
 
 from . import TuberError, TuberStateError, TuberRemoteError
 from .codecs import AcceptTypes, Codecs, TuberResult
@@ -212,7 +213,7 @@ class SimpleContext:
         self.calls.append((request, future))
         return future
 
-    def send(self, return_exceptions: bool = False):
+    def send(self, return_exceptions: bool = False, return_dicts: bool = False):
         """Break off a set of calls and return them for execution."""
 
         # An empty Context returns an empty list of calls
@@ -247,24 +248,88 @@ class SimpleContext:
             self.uri,
             json=calls,
             headers=headers,
-            hooks={"response": self._response_hook(futures, return_exceptions)},
+            hooks={"response": self._response_hook(futures, return_exceptions, return_dicts)},
         )
 
-    def _response_hook(self, futures: list["concurrent.futures.Future"], return_exceptions: bool = False):
+    def _response_hook(
+        self,
+        futures: list["concurrent.futures.Future"],
+        return_exceptions: bool = False,
+        return_dicts: bool = False,
+    ):
         """Hook function for parsing a response from the server into a list of futures for each context call"""
 
         def hook(r, *args, **kwargs):
-            results = self._receive(r, futures, return_exceptions)
+            results = self._receive(r, futures, return_exceptions, return_dicts)
             r.tuber_results = results
             return r
 
         return hook
+
+    @staticmethod
+    def _parse_json(
+        json_out,
+        futures: list,
+        return_exceptions: bool = False,
+        return_dicts: bool = False,
+    ):
+        if return_dicts:
+            def haskey(d, k):
+                return isinstance(d, dict) and k in d
+            def getkey(d, *k):
+                return functools.reduce(lambda d, k: d[k], k, d)
+        else:
+            haskey = hasattr
+            def getkey(d, *k):
+                return functools.reduce(lambda d, k: getattr(d, k), k, d)
+
+        if haskey(json_out, "error"):
+            # Oops - this is actually a server-side error that bubbles
+            # through. (See test_tuberpy_async_context_with_unserializable.)
+            # We made an array request, and received an object response
+            # because of an exception-catching scope in the server. Do the
+            # best we can.
+            for f in futures:
+                f.cancel()
+            raise TuberRemoteError(getkey(json_out, "error", "message"))
+
+        for f, r in zip(futures, json_out):
+            # Always emit warnings, if any occurred
+            if hasattr(r, "warnings") and getkey(r, "warnings"):
+                for w in getkey(r, "warnings"):
+                    warnings.warn(w)
+
+            # Resolve either a result or an error
+            if haskey(r, "error") and getkey(r, "error"):
+                err = getkey(r, "error")
+                if haskey(err, "message"):
+                    f.set_exception(TuberRemoteError(getkey(err, "message")))
+                else:
+                    f.set_exception(TuberRemoteError("Unknown error"))
+            else:
+                if haskey(r, "result"):
+                    f.set_result(getkey(r, "result"))
+                else:
+                    f.set_exception(TuberError("Result has no 'result' attribute"))
+
+        # Return a list of results
+        if return_exceptions:
+            out = []
+            for f in futures:
+                try:
+                    out.append(f.result())
+                except Exception as e:
+                    out.append(e)
+            return out
+
+        return [f.result() for f in futures]
 
     def _receive(
         self,
         response: "requests.Response",
         futures: list["concurrent.futures.Future"],
         return_exceptions: bool = False,
+        return_dicts: bool = False,
     ):
         """Parse response from a previously sent HTTP request."""
 
@@ -281,47 +346,11 @@ class SimpleContext:
             # this is slightly more liberal than checking that it is really among those we declared
             if content_type not in AcceptTypes:
                 raise TuberError(f"Unexpected response content type: {content_type}")
-            json_out = AcceptTypes[content_type](raw_out, resp.apparent_encoding)
+            json_out = AcceptTypes[content_type](
+                raw_out, resp.apparent_encoding, return_dicts=return_dicts
+            )
 
-        if hasattr(json_out, "error"):
-            # Oops - this is actually a server-side error that bubbles
-            # through. (See test_tuberpy_async_context_with_unserializable.)
-            # We made an array request, and received an object response
-            # because of an exception-catching scope in the server. Do the
-            # best we can.
-            for f in futures:
-                f.cancel()
-            raise TuberRemoteError(json_out.error.message)
-
-        for f, r in zip(futures, json_out):
-            # Always emit warnings, if any occurred
-            if hasattr(r, "warnings") and r.warnings:
-                for w in r.warnings:
-                    warnings.warn(w)
-
-            # Resolve either a result or an error
-            if hasattr(r, "error") and r.error:
-                if hasattr(r.error, "message"):
-                    f.set_exception(TuberRemoteError(r.error.message))
-                else:
-                    f.set_exception(TuberRemoteError("Unknown error"))
-            else:
-                if hasattr(r, "result"):
-                    f.set_result(r.result)
-                else:
-                    f.set_exception(TuberError("Result has no 'result' attribute"))
-
-        # Return a list of results
-        if return_exceptions:
-            out = []
-            for f in futures:
-                try:
-                    out.append(f.result())
-                except Exception as e:
-                    out.append(e)
-            return out
-
-        return [f.result() for f in futures]
+        return self._parse_json(json_out, futures, return_exceptions, return_dicts)
 
     def receive(self, response: "concurrent.futures.Future"):
         """Wait for a response from a previously sent HTTP request."""
@@ -329,9 +358,9 @@ class SimpleContext:
             return []
         return response.result().tuber_results
 
-    def __call__(self, return_exceptions: bool = False):
+    def __call__(self, return_exceptions: bool = False, return_dicts: bool = False):
         """Wait for any pending calls to complete and return the results from the server"""
-        resp = self.send(return_exceptions=return_exceptions)
+        resp = self.send(return_exceptions=return_exceptions, return_dicts=return_dicts)
         return self.receive(resp)
 
 
@@ -367,7 +396,7 @@ class Context(SimpleContext):
         self.calls.append((request, future))
         return future
 
-    async def __call__(self, return_exceptions: bool = False):
+    async def __call__(self, return_exceptions: bool = False, return_dicts: bool = False):
         """Break off a set of calls and return them for execution."""
 
         # An empty Context returns an empty list of calls
@@ -432,48 +461,9 @@ class Context(SimpleContext):
             # this is slightly more liberal than checking that it is really among those we declared
             if content_type not in AcceptTypes:
                 raise TuberError("Unexpected response content type: " + content_type)
-            json_out = AcceptTypes[content_type](raw_out, resp.charset)
+            json_out = AcceptTypes[content_type](raw_out, resp.charset, return_dicts=return_dicts)
 
-        if hasattr(json_out, "error"):
-            # Oops - this is actually a server-side error that bubbles
-            # through. (See test_tuberpy_async_context_with_unserializable.)
-            # We made an array request, and received an object response
-            # because of an exception-catching scope in the server. Do the
-            # best we can.
-            for f in futures:
-                f.cancel()
-            raise TuberRemoteError(json_out.error.message)
-
-        # Resolve futures
-        for f, r in zip(futures, json_out):
-            # Always emit warnings, if any occurred
-            if hasattr(r, "warnings") and r.warnings:
-                for w in r.warnings:
-                    warnings.warn(w)
-
-            # Resolve either a result or an error
-            if hasattr(r, "error") and r.error:
-                if hasattr(r.error, "message"):
-                    f.set_exception(TuberRemoteError(r.error.message))
-                else:
-                    f.set_exception(TuberRemoteError("Unknown error"))
-            else:
-                if hasattr(r, "result"):
-                    f.set_result(r.result)
-                else:
-                    f.set_exception(TuberError("Result has no 'result' attribute"))
-
-        # Return a list of results
-        if return_exceptions:
-            out = []
-            for f in futures:
-                try:
-                    out.append(await f)
-                except Exception as e:
-                    out.append(e)
-            return out
-
-        return [await f for f in futures]
+        return self._parse_json(json_out, futures, return_exceptions, return_dicts)
 
 
 class SimpleTuberObject:
