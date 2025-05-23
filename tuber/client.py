@@ -213,8 +213,25 @@ class SimpleContext:
         self.calls.append((request, future))
         return future
 
-    def send(self, return_exceptions: bool = False, return_dicts: bool = False):
-        """Break off a set of calls and return them for execution."""
+    def send(self, convert_json: bool = True, return_exceptions: bool = False):
+        """Break off a set of calls and return them for execution.
+
+        Arguments
+        ---------
+        convert_json : bool
+            If True, convert json dicts to namespace objects in the server response.
+            Otherwise, return any non-error outputs as standard Python dicts.
+        return_exceptions : bool
+            If True, return exceptions in the server response, allowing inspection of
+            all entries in the response list.  Otherwise, any errors in the output
+            are raised as exceptions.
+
+        Returns
+        -------
+        response : concurrent.futures.Future
+            Future object corresponding to the server request.  Use ``receive()`` to
+            retrieve the result from the server.
+        """
 
         # An empty Context returns an empty list of calls
         if not self.calls:
@@ -248,19 +265,31 @@ class SimpleContext:
             self.uri,
             json=calls,
             headers=headers,
-            hooks={"response": self._response_hook(futures, return_exceptions, return_dicts)},
+            hooks={"response": self._response_hook(futures, convert_json, return_exceptions)},
         )
 
     def _response_hook(
         self,
         futures: list["concurrent.futures.Future"],
+        convert_json: bool = True,
         return_exceptions: bool = False,
-        return_dicts: bool = False,
     ):
-        """Hook function for parsing a response from the server into a list of futures for each context call"""
+        """Hook function for parsing a response from the server into a list of futures for each context call
+
+
+        Arguments
+        ---------
+        convert_json : bool
+            If True, convert json dicts to namespace objects in the server response.
+            Otherwise, return any non-error outputs as standard Python dicts.
+        return_exceptions : bool
+            If True, return exceptions in the server response, allowing inspection of
+            all entries in the response list.  Otherwise, any errors in the output
+            are raised as exceptions.
+        """
 
         def hook(r, *args, **kwargs):
-            results = self._receive(r, futures, return_exceptions, return_dicts)
+            results = self._receive(r, futures, convert_json, return_exceptions)
             r.tuber_results = results
             return r
 
@@ -270,22 +299,22 @@ class SimpleContext:
     def _parse_json(
         json_out,
         futures: list,
+        converted: bool = True,
         return_exceptions: bool = False,
-        return_dicts: bool = False,
     ):
-        if return_dicts:
+        if converted:
+            haskey = hasattr
+
+            def getkey(d, *k):
+                return functools.reduce(lambda d, k: getattr(d, k), k, d)
+
+        else:
 
             def haskey(d, k):
                 return isinstance(d, dict) and k in d
 
             def getkey(d, *k):
                 return functools.reduce(lambda d, k: d[k], k, d)
-
-        else:
-            haskey = hasattr
-
-            def getkey(d, *k):
-                return functools.reduce(lambda d, k: getattr(d, k), k, d)
 
         if haskey(json_out, "error"):
             # Oops - this is actually a server-side error that bubbles
@@ -332,8 +361,8 @@ class SimpleContext:
         self,
         response: "requests.Response",
         futures: list["concurrent.futures.Future"],
+        convert_json: bool = True,
         return_exceptions: bool = False,
-        return_dicts: bool = False,
     ):
         """Parse response from a previously sent HTTP request."""
 
@@ -350,9 +379,9 @@ class SimpleContext:
             # this is slightly more liberal than checking that it is really among those we declared
             if content_type not in AcceptTypes:
                 raise TuberError(f"Unexpected response content type: {content_type}")
-            json_out = AcceptTypes[content_type](raw_out, resp.apparent_encoding, return_dicts=return_dicts)
+            json_out = AcceptTypes[content_type](raw_out, resp.apparent_encoding, convert_json=convert_json)
 
-        return self._parse_json(json_out, futures, return_exceptions, return_dicts)
+        return self._parse_json(json_out, futures, convert_json, return_exceptions)
 
     def receive(self, response: "concurrent.futures.Future"):
         """Wait for a response from a previously sent HTTP request."""
@@ -360,9 +389,26 @@ class SimpleContext:
             return []
         return response.result().tuber_results
 
-    def __call__(self, return_exceptions: bool = False, return_dicts: bool = False):
-        """Wait for any pending calls to complete and return the results from the server"""
-        resp = self.send(return_exceptions=return_exceptions, return_dicts=return_dicts)
+    def __call__(self, convert_json: bool = True, return_exceptions: bool = False):
+        """Wait for any pending calls to complete and return the results from the server
+
+        Arguments
+        ---------
+        convert_json : bool
+            If True, convert json dicts to namespace objects in the server response.
+            Otherwise, return any non-error outputs as standard Python dicts.
+        return_exceptions : bool
+            If True, return exceptions in the server response, allowing inspection of
+            all entries in the response list.  Otherwise, any errors in the output
+            are raised as exceptions.
+
+        Returns
+        -------
+        response : list
+            List of responses from the server, corresponding to each of the requested
+            calls.
+        """
+        resp = self.send(convert_json=convert_json, return_exceptions=return_exceptions)
         return self.receive(resp)
 
 
@@ -398,7 +444,7 @@ class Context(SimpleContext):
         self.calls.append((request, future))
         return future
 
-    async def __call__(self, return_exceptions: bool = False, return_dicts: bool = False):
+    async def __call__(self, convert_json: bool = True, return_exceptions: bool = False):
         """Break off a set of calls and return them for execution."""
 
         # An empty Context returns an empty list of calls
@@ -463,9 +509,9 @@ class Context(SimpleContext):
             # this is slightly more liberal than checking that it is really among those we declared
             if content_type not in AcceptTypes:
                 raise TuberError("Unexpected response content type: " + content_type)
-            json_out = AcceptTypes[content_type](raw_out, resp.charset, return_dicts=return_dicts)
+            json_out = AcceptTypes[content_type](raw_out, resp.charset, convert_json=convert_json)
 
-        return self._parse_json(json_out, futures, return_exceptions, return_dicts)
+        return self._parse_json(json_out, futures, convert_json, return_exceptions)
 
 
 class SimpleTuberObject:
