@@ -249,7 +249,7 @@ class SimpleContext:
         accept_types: list[str] | None = None,
         convert_json: bool | None = None,
         return_exceptions: bool | None = None,
-        **ctx_kwargs
+        **ctx_kwargs,
     ):
         """
         Arguments
