@@ -23,24 +23,100 @@ __all__ = [
 ]
 
 
-async def resolve(hostname: str, objname: str | None = None, accept_types: list[str] | None = None):
+async def resolve(
+    hostname: str,
+    objname: str | None = None,
+    accept_types: list[str] | None = None,
+    convert_json: bool | None = None,
+    return_exceptions: bool | None = None,
+):
     """Create a local reference to a networked resource.
 
     This is the recommended way to connect asynchronously to remote tuberd instances.
+
+    Arguments
+    ---------
+    hostname : str
+        Hostname to connect to.  Maybe an IP address or a resolved DNS name.
+    objname : str
+        Object to attach to on the server.  If None, attach to the top-level registry.
+        Otherwise must be an entry in the registry dictionary.
+    accept_types : list of str
+        List of codecs that the client is able to decode.
+    convert_json : bool
+        If True, convert json dicts to namespace objects in the server response.  If
+        False, return any non-error outputs as standard Python dicts.  Otherwise,
+        fall back to context default.  This default may be overridden in the context
+        construction or in each individual context call.
+    return_exceptions : bool
+        If True, return exceptions in the server response, allowing inspection of all
+        entries in the response list.  If False, any errors in the output are raised
+        as exceptions.  Otherwise, fall back to context default.  This default may be
+        overridden in the context construction or in each individual context call.
+
+    Returns
+    -------
+    obj : TuberObject
+        A tuber object whose methods are awaitable, and may be used with the
+        ``asyncio`` library for asynchronous execution.
     """
 
-    instance = TuberObject(objname, hostname=hostname, accept_types=accept_types)
+    instance = TuberObject(
+        objname,
+        hostname=hostname,
+        accept_types=accept_types,
+        convert_json=convert_json,
+        return_exceptions=return_exceptions,
+    )
     await instance.tuber_resolve()
     return instance
 
 
-def resolve_simple(hostname: str, objname: str | None = None, accept_types: list[str] | None = None):
+def resolve_simple(
+    hostname: str,
+    objname: str | None = None,
+    accept_types: list[str] | None = None,
+    convert_json: bool | None = None,
+    return_exceptions: bool | None = None,
+):
     """Create a local reference to a networked resource.
 
     This is the recommended way to connect serially to remote tuberd instances.
+
+    Arguments
+    ---------
+    hostname : str
+        Hostname to connect to.  Maybe an IP address or a resolved DNS name.
+    objname : str
+        Object to attach to on the server.  If None, attach to the top-level registry.
+        Otherwise must be an entry in the registry dictionary.
+    accept_types : list of str
+        List of codecs that the client is able to decode.
+    convert_json : bool
+        If True, convert json dicts to namespace objects in the server response.  If
+        False, return any non-error outputs as standard Python dicts.  Otherwise,
+        fall back to context default.  This default may be overridden in the context
+        construction or in each individual context call.
+    return_exceptions : bool
+        If True, return exceptions in the server response, allowing inspection of all
+        entries in the response list.  If False, any errors in the output are raised
+        as exceptions.  Otherwise, fall back to context default.  This default may be
+        overridden in the context construction or in each individual context call.
+
+    Returns
+    -------
+    obj : SimpleTuberObject
+        A tuber object whose methods may be called serially, and can be integrated with
+        the ``concurrent`` library for asynchronous execution.
     """
 
-    instance = SimpleTuberObject(objname, hostname=hostname, accept_types=accept_types)
+    instance = SimpleTuberObject(
+        objname,
+        hostname=hostname,
+        accept_types=accept_types,
+        convert_json=convert_json,
+        return_exceptions=return_exceptions,
+    )
     instance.tuber_resolve()
     return instance
 
@@ -166,8 +242,36 @@ class SimpleContext:
     up to reduce roundtrips.
     """
 
-    def __init__(self, obj: "SimpleTuberObject", *, accept_types: list[str] | None = None, **ctx_kwargs):
-        self.calls: list[dict] = []
+    def __init__(
+        self,
+        obj: "SimpleTuberObject",
+        *,
+        accept_types: list[str] | None = None,
+        convert_json: bool | None = None,
+        return_exceptions: bool | None = None,
+        **ctx_kwargs
+    ):
+        """
+        Arguments
+        ---------
+        obj : SimpleTuberObject
+            Parent tuber object whose methods to call.
+        accept_types : list of str
+            List of codecs that the client is able to decode.
+        convert_json : bool
+            If True (default), all responses from the server should be converted into
+            namespace objects by default.  This default may be overridden in the
+            context construction or in each individual context call.
+        return_exceptions : bool
+            If True, return server-side exceptions in the response list by default.
+            If False (default), raise the exception when parsing the server response.
+            This default may be overridden in the context construction or in each
+            individual context call.
+        ctx_kwargs :
+            Any remaining keyword arguments are added as additional keywords to any
+            method call made by this context.
+        """
+        self.calls: list[tuple[dict, concurrent.futures.Future]] = []
         self.obj = obj
         self.uri = f"http://{obj._tuber_host}/tuber"
         if accept_types is None:
@@ -179,6 +283,12 @@ class SimpleContext:
                 if accept_type not in AcceptTypes.keys():
                     raise ValueError(f"Unsupported accept type: {accept_type}")
             self.accept_types = accept_types
+        if convert_json is None:
+            convert_json = self.obj._convert_json
+        self.convert_json = True if convert_json is None else convert_json
+        if return_exceptions is None:
+            return_exceptions = self.obj._return_exceptions
+        self.return_exceptions = False if return_exceptions is None else return_exceptions
         self.ctx_kwargs = ctx_kwargs
         self.container = {}
 
@@ -213,18 +323,19 @@ class SimpleContext:
         self.calls.append((request, future))
         return future
 
-    def send(self, convert_json: bool = True, return_exceptions: bool = False):
+    def send(self, convert_json: bool | None = None, return_exceptions: bool | None = None):
         """Break off a set of calls and return them for execution.
 
         Arguments
         ---------
         convert_json : bool
             If True, convert json dicts to namespace objects in the server response.
-            Otherwise, return any non-error outputs as standard Python dicts.
+            If False, return any non-error outputs as standard Python dicts.
+            Otherwise, fall back to context default.
         return_exceptions : bool
             If True, return exceptions in the server response, allowing inspection of
-            all entries in the response list.  Otherwise, any errors in the output
-            are raised as exceptions.
+            all entries in the response list.  If False, any errors in the output
+            are raised as exceptions.  Otherwise, fall back to context default.
 
         Returns
         -------
@@ -259,49 +370,43 @@ class SimpleContext:
         if return_exceptions:
             headers["X-Tuber-Options"] = "continue-on-error"
 
+        # Hook function for parsing the response from the server
+        def hook(r, *args, **kwargs):
+            self._receive(r, futures, convert_json, return_exceptions)
+            return r
+
         # Create a HTTP request to complete the call.
         # Returns a Future whose result has been processed by the response hook.
-        return cs.post(
-            self.uri,
-            json=calls,
-            headers=headers,
-            hooks={"response": self._response_hook(futures, convert_json, return_exceptions)},
-        )
+        return cs.post(self.uri, json=calls, headers=headers, hooks={"response": hook})
 
-    def _response_hook(
-        self,
-        futures: list["concurrent.futures.Future"],
-        convert_json: bool = True,
-        return_exceptions: bool = False,
-    ):
-        """Hook function for parsing a response from the server into a list of futures for each context call
-
+    @staticmethod
+    def _parse_json(json_out, futures: list, converted: bool, return_exceptions: bool):
+        """Parse json object and assign results to futures corresponding to the set of
+        calls that were sent to the server.
 
         Arguments
         ---------
-        convert_json : bool
-            If True, convert json dicts to namespace objects in the server response.
-            Otherwise, return any non-error outputs as standard Python dicts.
+        json_out:
+            JSON-decoded response from the server. May be an error message or a list
+            of responses, one per server call.
+        futures: list
+            List of futures corresponding to each call sent to the server.
+        converted : bool
+            If True, any dicts in json_out have been converted to namespace objects.
+            Otherwise, dicts remain as they were returned from the server.
         return_exceptions : bool
             If True, return exceptions in the server response, allowing inspection of
             all entries in the response list.  Otherwise, any errors in the output
             are raised as exceptions.
+
+        Returns
+        -------
+        responses : list
+            List of responses from the server, corresponding to the set of sent calls.
+            Each response is also assigned to its corresponding future.  If
+            ``return_exceptions`` is True, each response may be a ``TuberRemoteError``
+            object, rather than a namespace object (if ``converted`` is True) or a dict.
         """
-
-        def hook(r, *args, **kwargs):
-            results = self._receive(r, futures, convert_json, return_exceptions)
-            r.tuber_results = results
-            return r
-
-        return hook
-
-    @staticmethod
-    def _parse_json(
-        json_out,
-        futures: list,
-        converted: bool = True,
-        return_exceptions: bool = False,
-    ):
         if converted:
             haskey = hasattr
 
@@ -361,10 +466,41 @@ class SimpleContext:
         self,
         response: "requests.Response",
         futures: list["concurrent.futures.Future"],
-        convert_json: bool = True,
-        return_exceptions: bool = False,
+        convert_json: bool | None = None,
+        return_exceptions: bool | None = None,
     ):
-        """Parse response from a previously sent HTTP request."""
+        """Parse response from a previously sent HTTP request.  Assign results to
+        futures corresponding to the set of calls that were sent to the server, and
+        store the results as the ``.tuber_results`` attribute of the response object.
+
+        Arguments
+        ---------
+        response : requests.Response
+            Response object corresponding to the server request.
+        futures : list
+            List of futures corresponding to each call sent to the server.
+        convert_json : bool
+            If True, convert json dicts to namespace objects in the server response.
+            If False, return any non-error outputs as standard Python dicts.
+            Otherwise, fall back to context default.
+        return_exceptions : bool
+            If True, return exceptions in the server response, allowing inspection of
+            all entries in the response list.  If False, any errors in the output
+            are raised as exceptions.  Otherwise, fall back to context default.
+
+        Returns
+        -------
+        responses : list
+            List of responses from the server, corresponding to the set of sent calls.
+            Each response is also assigned to its corresponding future.  If
+            ``return_exceptions`` is True, each response may be a ``TuberRemoteError``
+            object, rather than a namespace object (if ``convert_json`` is True) or a dict.
+        """
+
+        if convert_json is None:
+            convert_json = self.convert_json
+        if return_exceptions is None:
+            return_exceptions = self.return_exceptions
 
         with response as resp:
             raw_out = resp.content
@@ -379,28 +515,41 @@ class SimpleContext:
             # this is slightly more liberal than checking that it is really among those we declared
             if content_type not in AcceptTypes:
                 raise TuberError(f"Unexpected response content type: {content_type}")
-            json_out = AcceptTypes[content_type](raw_out, resp.apparent_encoding, convert_json=convert_json)
+            json_out = AcceptTypes[content_type](raw_out, resp.apparent_encoding, convert=convert_json)
 
-        return self._parse_json(json_out, futures, convert_json, return_exceptions)
+        response.tuber_results = self._parse_json(json_out, futures, convert_json, return_exceptions)
+        return response.tuber_results
 
     def receive(self, response: "concurrent.futures.Future"):
-        """Wait for a response from a previously sent HTTP request."""
+        """Wait for a response from a previously sent HTTP request.
+
+        Arguments
+        ---------
+        response : requests.Response
+            Response object corresponding to the server request.
+
+        Returns
+        -------
+        responses : list
+            List of responses from the server, corresponding to the set of sent calls.
+        """
         if response is None:
             return []
         return response.result().tuber_results
 
-    def __call__(self, convert_json: bool = True, return_exceptions: bool = False):
+    def __call__(self, convert_json: bool | None = None, return_exceptions: bool | None = None):
         """Wait for any pending calls to complete and return the results from the server
 
         Arguments
         ---------
         convert_json : bool
             If True, convert json dicts to namespace objects in the server response.
-            Otherwise, return any non-error outputs as standard Python dicts.
+            If False, return any non-error outputs as standard Python dicts.
+            Otherwise, fall back to context default.
         return_exceptions : bool
             If True, return exceptions in the server response, allowing inspection of
-            all entries in the response list.  Otherwise, any errors in the output
-            are raised as exceptions.
+            all entries in the response list.  If False, any errors in the output
+            are raised as exceptions.  Otherwise, fall back to context default.
 
         Returns
         -------
@@ -421,6 +570,23 @@ class Context(SimpleContext):
     """
 
     def __init__(self, obj: "TuberObject", **kwargs):
+        """
+        Arguments
+        ---------
+        obj : TuberObject
+            Parent tuber object whose methods to call.
+        accept_types : list of str
+            List of codecs that the client is able to decode.
+        convert_json : bool
+            If True (default), all responses from the server should be converted into
+            namespace objects by default.  This default may be overridden in the
+            context construction or in each individual context call.
+        return_exceptions : bool
+            If True, return server-side exceptions in the response list by default.
+            If False (default), raise the exception when parsing the server response.
+            This default may be overridden in the context construction or in each
+            individual context call.
+        """
         super().__init__(obj, **kwargs)
         self.calls: list[tuple[dict, asyncio.Future]] = []
 
@@ -444,8 +610,26 @@ class Context(SimpleContext):
         self.calls.append((request, future))
         return future
 
-    async def __call__(self, convert_json: bool = True, return_exceptions: bool = False):
-        """Break off a set of calls and return them for execution."""
+    async def __call__(self, convert_json: bool | None = None, return_exceptions: bool | None = None):
+        """Break off a set of calls and return them for execution.
+
+        Arguments
+        ---------
+        convert_json : bool
+            If True, convert json dicts to namespace objects in the server response.
+            If False, return any non-error outputs as standard Python dicts.
+            Otherwise, fall back to context default.
+        return_exceptions : bool
+            If True, return exceptions in the server response, allowing inspection of
+            all entries in the response list.  If False, any errors in the output
+            are raised as exceptions.  Otherwise, fall back to context default.
+
+        Returns
+        -------
+        response : list
+            List of responses from the server, corresponding to each of the requested
+            calls.
+        """
 
         # An empty Context returns an empty list of calls
         if not self.calls:
@@ -489,6 +673,11 @@ class Context(SimpleContext):
 
         cs = loop._tuber_session
 
+        if convert_json is None:
+            convert_json = self.convert_json
+        if return_exceptions is None:
+            return_exceptions = self.return_exceptions
+
         # Declare the media types we want to allow getting back
         headers = {"Accept": ", ".join(self.accept_types)}
         if return_exceptions:
@@ -509,7 +698,7 @@ class Context(SimpleContext):
             # this is slightly more liberal than checking that it is really among those we declared
             if content_type not in AcceptTypes:
                 raise TuberError("Unexpected response content type: " + content_type)
-            json_out = AcceptTypes[content_type](raw_out, resp.charset, convert_json=convert_json)
+            json_out = AcceptTypes[content_type](raw_out, resp.charset, convert=convert_json)
 
         return self._parse_json(json_out, futures, convert_json, return_exceptions)
 
@@ -533,16 +722,46 @@ class SimpleTuberObject:
         *,
         hostname: str | None = None,
         accept_types: list[str] | None = None,
+        convert_json: bool | None = None,
+        return_exceptions: bool | None = None,
         parent: "SimpleTuberObject" | None = None,
     ):
+        """
+        Arguments
+        ---------
+        objname : str
+            Object to attach to on the server.  If None, attach to the top-level registry.
+            Otherwise must be an entry in the registry dictionary.
+        hostname : str
+            Hostname to connect to.  Maybe an IP address or a resolved DNS name.
+        accept_types : list of str
+            List of codecs that the client is able to decode.
+        convert_json : bool
+            If True, convert json dicts to namespace objects in the server response.
+            If False, return any non-error outputs as standard Python dicts.
+            Otherwise, fall back to context default.  This default may be overridden
+            in the context construction or in each individual context call.
+        return_exceptions : bool
+            If True, return exceptions in the server response, allowing inspection of
+            all entries in the response list.  If False, any errors in the output are
+            raised as exceptions.  Otherwise, fall back to context default.  This
+            default may be overridden in the context construction or in each
+            individual context call.
+        parent: SimpleTuberObject
+            If given, assume this object is an attribute of this parent object.
+        """
         self._tuber_objname = objname
         if parent is None:
             assert hostname, "Argument 'hostname' required"
             self._tuber_host = hostname
             self._accept_types = accept_types
+            self._convert_json = convert_json
+            self._return_exceptions = return_exceptions
         else:
             self._tuber_host = parent._tuber_host
             self._accept_types = parent._accept_types
+            self._convert_json = parent._convert_json
+            self._return_exceptions = parent._return_exceptions
 
     @property
     def is_container(self):
@@ -597,7 +816,7 @@ class SimpleTuberObject:
             except AttributeError:
                 pass
 
-        with self.tuber_context() as ctx:
+        with self.tuber_context(convert_json=True, return_exceptions=False) as ctx:
             ctx._add_call(object=self._tuber_objname, resolve=True)
             meta = ctx()
             meta = meta[0]
@@ -609,7 +828,7 @@ class SimpleTuberObject:
         """Resolve a remote method call into a callable function"""
 
         def invoke(self, *args, **kwargs):
-            with self.tuber_context() as ctx:
+            with self.tuber_context(convert_json=True, return_exceptions=False) as ctx:
                 r = getattr(ctx, name)(*args, **kwargs)
             return r.result()
 
@@ -653,8 +872,7 @@ class SimpleTuberObject:
             # rather than manage potentially async calls in what is normally a
             # synchronous context.
             if isinstance(meta.methods, list):
-                sto = SimpleTuberObject(objname=self._tuber_objname, hostname=self._tuber_host)
-                with sto.tuber_context() as ctx:
+                with SimpleContext(self, convert_json=True, return_exceptions=False) as ctx:
                     for m in meta.methods:
                         ctx._add_call(object=self._tuber_objname, property=m)
                     meta.methods = TuberResult(dict(zip(meta.methods, ctx())))
@@ -672,8 +890,7 @@ class SimpleTuberObject:
         if hasattr(meta, "properties"):
             # same workaround as above
             if isinstance(meta.properties, list):
-                sto = SimpleTuberObject(objname=self._tuber_objname, hostname=self._tuber_host)
-                with sto.tuber_context() as ctx:
+                with SimpleContext(self, convert_json=True, return_exceptions=False) as ctx:
                     for m in meta.properties:
                         ctx._add_call(object=self._tuber_objname, property=m)
                     meta.properties = TuberResult(dict(zip(meta.properties, ctx())))
@@ -754,7 +971,7 @@ class TuberObject(SimpleTuberObject):
             except AttributeError:
                 pass
 
-        async with self.tuber_context() as ctx:
+        async with self.tuber_context(convert_json=True, return_exceptions=False) as ctx:
             ctx._add_call(object=self._tuber_objname, resolve=True)
             meta = await ctx()
             meta = meta[0]
@@ -766,7 +983,7 @@ class TuberObject(SimpleTuberObject):
         """Resolve a remote method call into an async callable function"""
 
         async def invoke(self, *args, **kwargs):
-            async with self.tuber_context() as ctx:
+            async with self.tuber_context(convert_json=True, return_exceptions=False) as ctx:
                 getattr(ctx, name)(*args, **kwargs)
                 results = await ctx()
             return results[0]
