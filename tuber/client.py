@@ -828,7 +828,7 @@ class SimpleTuberObject:
         """Resolve a remote method call into a callable function"""
 
         def invoke(self, *args, **kwargs):
-            with self.tuber_context(convert_json=True, return_exceptions=False) as ctx:
+            with self.tuber_context() as ctx:
                 r = getattr(ctx, name)(*args, **kwargs)
             return r.result()
 
@@ -983,7 +983,7 @@ class TuberObject(SimpleTuberObject):
         """Resolve a remote method call into an async callable function"""
 
         async def invoke(self, *args, **kwargs):
-            async with self.tuber_context(convert_json=True, return_exceptions=False) as ctx:
+            async with self.tuber_context() as ctx:
                 getattr(ctx, name)(*args, **kwargs)
                 results = await ctx()
             return results[0]
