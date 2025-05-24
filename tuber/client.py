@@ -271,7 +271,7 @@ class SimpleContext:
             Any remaining keyword arguments are added as additional keywords to any
             method call made by this context.
         """
-        self.calls: list[tuple[dict, concurrent.futures.Future]] = []
+        self.calls: list[tuple[dict, "Future"]] = []
         self.obj = obj
         self.uri = f"http://{obj._tuber_host}/tuber"
         if accept_types is None:
@@ -568,27 +568,6 @@ class Context(SimpleContext):
     Commands are dispatched strictly in-order, but are automatically bundled
     up to reduce roundtrips.
     """
-
-    def __init__(self, obj: "TuberObject", **kwargs):
-        """
-        Arguments
-        ---------
-        obj : TuberObject
-            Parent tuber object whose methods to call.
-        accept_types : list of str
-            List of codecs that the client is able to decode.
-        convert_json : bool
-            If True (default), all responses from the server should be converted into
-            namespace objects by default.  This default may be overridden in the
-            context construction or in each individual context call.
-        return_exceptions : bool
-            If True, return server-side exceptions in the response list by default.
-            If False (default), raise the exception when parsing the server response.
-            This default may be overridden in the context construction or in each
-            individual context call.
-        """
-        super().__init__(obj, **kwargs)
-        self.calls: list[tuple[dict, asyncio.Future]] = []
 
     async def __aenter__(self):
         return self
