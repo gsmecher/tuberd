@@ -193,7 +193,7 @@ if have_orjson:
     Codecs["orjson"] = Codec(decode=decode_orjson, encode=encode_orjson)
 
 
-def decode_json_client(response_data, encoding):
+def decode_json_client(response_data, encoding, convert=True):
     if encoding is None:  # guess the typical default if unspecified
         encoding = "utf-8"
 
@@ -203,7 +203,7 @@ def decode_json_client(response_data, encoding):
                 return bytes(obj["bytes"])
             except e as ValueError:
                 pass
-        return TuberResult(obj)
+        return TuberResult(obj) if convert else obj
 
     return decode_json(response_data.decode(encoding), object_hook=ohook)
 
@@ -222,7 +222,9 @@ if have_cbor:
 
     Codecs["cbor"] = Codec(decode=decode_cbor, encode=encode_cbor)
 
-    def decode_cbor_client(response_data, encoding):
+    def decode_cbor_client(response_data, encoding, convert=True):
+        if not convert:
+            return decode_cbor(response_data)
         return decode_cbor(response_data, object_hook=lambda dec, data: TuberResult(data))
 
     AcceptTypes["application/cbor"] = decode_cbor_client
