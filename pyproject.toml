@@ -1,6 +1,7 @@
 [build-system]
 requires = [
     "cmake>=3.12",
+    "packaging",
     "pybind11",
     "setuptools>=61",
     "setuptools_scm[toml]>=6.3",
