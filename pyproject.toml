@@ -18,10 +18,9 @@ authors=[
 urls={source="https://github.com/gsmecher/tuberd"}
 classifiers=[
     "Programming Language :: Python :: 3",
-    "License :: OSI Approved :: BSD License",
     "Operating System :: OS Independent",
 ]
-license = {file="LICENSE"}
+license = "BSD-3-Clause"
 dependencies = ["requests", "requests-futures"]
 dynamic = ["version", "scripts"]
 
