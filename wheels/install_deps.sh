@@ -39,7 +39,7 @@ cd $prefix
 [ -e libhttpserver ] || git clone https://github.com/etr/libhttpserver.git
 cd libhttpserver
 git checkout 0.19.0
-[ -e configure ] || ./bootstrap
+[ -e configure ] || (autoupdate && ./bootstrap && rm -f aclocal.m4 && ./bootstrap)
 [ -e build ] || mkdir build
 cd build
 ../configure --with-pic --enable-shared=no --disable-examples --prefix=$prefix CFLAGS=-I$prefix/include CXXFLAGS=-I$prefix/include LDFLAGS="-pthread -L$prefix/lib" || (

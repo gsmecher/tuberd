@@ -1,7 +1,6 @@
 [build-system]
 requires = [
     "cmake>=3.12",
-    "packaging",
     "pybind11",
     "setuptools>=61",
     "setuptools_scm[toml]>=6.3",
@@ -46,4 +45,10 @@ before-all = "./wheels/install_deps.sh"
 test-command = [
     "pytest -sv {project}/tests/test.py --import-mode append",
     "pytest -sv {project}/tests/test.py --import-mode append --orjson",
+]
+
+[tool.cibuildwheel.linux]
+before-all = [
+    "(apk add --update automake autoconf libtool || true)",
+    "./wheels/install_deps.sh",
 ]
