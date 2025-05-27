@@ -54,10 +54,10 @@ jobs:
           platforms: ${{ matrix.arch }}
 
       - name: Build wheels
-        uses: pypa/cibuildwheel@v2.20.0
+        uses: pypa/cibuildwheel@v2.23.3
         env:
           CIBW_ARCHS: ${{ matrix.arch }}
-          CIBW_SKIP: pp* cp36-* cp37-* cp38-macosx_arm64
+          CIBW_SKIP: pp* cp36-* cp37-* cp38-*
           CIBW_TEST_SKIP: "*_aarch64"
           CIBW_BUILD_VERBOSITY: 1
 

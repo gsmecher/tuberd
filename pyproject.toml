@@ -46,3 +46,8 @@ test-command = [
     "pytest -sv {project}/tests/test.py --import-mode append",
     "pytest -sv {project}/tests/test.py --import-mode append --orjson",
 ]
+
+[[tool.cibuildwheel.overrides]]
+select = "*-musllinux*"
+inherit.before-all = "prepend"
+before-all = "apk add --update automake autoconf libtool"
