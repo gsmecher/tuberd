@@ -730,6 +730,7 @@ class SimpleTuberObject:
             If given, assume this object is an attribute of this parent object.
         """
         self._tuber_objname = objname
+        self._tuber_resolved = False
         if parent is None:
             assert hostname, "Argument 'hostname' required"
             self._tuber_host = hostname
@@ -756,7 +757,7 @@ class SimpleTuberObject:
     def tuber_is_container(self):
         """True if object is a container (list or dict) of remote items,
         otherwise False if resolved or None if not resolved."""
-        if hasattr(self, "_tuber_meta"):
+        if self._tuber_resolved:
             return hasattr(self, "_items")
 
     def __getattr__(self, name: str):
@@ -799,11 +800,8 @@ class SimpleTuberObject:
         This class retrieves object-wide metadata, which is used to build
         up properties and methods with tab-completion and docstrings.
         """
-        if not force:
-            try:
-                return self._tuber_meta
-            except AttributeError:
-                pass
+        if self._tuber_resolved and not force:
+            return
 
         with self.tuber_context(convert_json=False, return_exceptions=False) as ctx:
             ctx._add_call(object=self._tuber_objname, resolve=True)
@@ -944,7 +942,7 @@ class SimpleTuberObject:
 
             setattr(self, "tuber_get", types.MethodType(tuber_get, self))
 
-        self._tuber_meta = meta
+        self._tuber_resolved = True
         return meta
 
 
@@ -966,11 +964,8 @@ class TuberObject(SimpleTuberObject):
         This class retrieves object-wide metadata, which is used to build
         up properties and methods with tab-completion and docstrings.
         """
-        if not force:
-            try:
-                return self._tuber_meta
-            except AttributeError:
-                pass
+        if self._tuber_resolved and not force:
+            return
 
         async with self.tuber_context(convert_json=False, return_exceptions=False) as ctx:
             ctx._add_call(object=self._tuber_objname, resolve=True)
