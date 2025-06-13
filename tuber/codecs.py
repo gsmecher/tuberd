@@ -1,6 +1,7 @@
 from collections.abc import Sequence, Mapping
 from collections import namedtuple
 import sys
+import types
 
 try:
     import numpy
@@ -30,18 +31,8 @@ except ImportError:
     have_cbor = False
 
 
-class TuberResult:
-    def __init__(self, d):
-        "Allow dotted accessors, like an object"
-        self.__dict__.update(d)
-
-    def __iter__(self):
-        "Make the results object iterate as a list of keys, like a dict"
-        return iter(self.__dict__)
-
-    def __repr__(self):
-        "Return a concise representation string"
-        return repr(self.__dict__)
+class TuberResult(types.SimpleNamespace):
+    pass
 
 
 def wrap_bytes_for_json(obj):
@@ -203,7 +194,7 @@ def decode_json_client(response_data, encoding, convert=True):
                 return bytes(obj["bytes"])
             except e as ValueError:
                 pass
-        return TuberResult(obj) if convert else obj
+        return TuberResult(**obj) if convert else obj
 
     return decode_json(response_data.decode(encoding), object_hook=ohook)
 
@@ -225,6 +216,6 @@ if have_cbor:
     def decode_cbor_client(response_data, encoding, convert=True):
         if not convert:
             return decode_cbor(response_data)
-        return decode_cbor(response_data, object_hook=lambda dec, data: TuberResult(data))
+        return decode_cbor(response_data, object_hook=lambda dec, data: TuberResult(**data))
 
     AcceptTypes["application/cbor"] = decode_cbor_client
