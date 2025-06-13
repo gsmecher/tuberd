@@ -965,7 +965,7 @@ class TuberObject(SimpleTuberObject):
             meta = await ctx()
             meta = meta[0]
 
-        return self._resolve_meta(meta)
+        self._resolve_meta(meta)
 
     @staticmethod
     def _resolve_method(name: str, meta: TuberResult):
