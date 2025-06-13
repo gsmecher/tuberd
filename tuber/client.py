@@ -810,10 +810,10 @@ class SimpleTuberObject:
             meta = ctx()
             meta = meta[0]
 
-        return self._resolve_meta(meta)
+        self._resolve_meta(meta)
 
     @staticmethod
-    def _resolve_method(name: str, meta: TuberResult):
+    def _resolve_method(name: str, meta: dict):
         """Resolve a remote method call into a callable function"""
 
         def invoke(self, *args, **kwargs):
@@ -823,7 +823,12 @@ class SimpleTuberObject:
 
         return tuber_wrapper(invoke, meta)
 
-    def _resolve_object(self, attr: str | None = None, item: str | int | None = None, meta: TuberResult | None = None):
+    def _resolve_object(
+        self,
+        attr: str | None = None,
+        item: str | int | None = None,
+        meta: dict | None = None,
+    ):
         """Create a TuberObject representing the given attribute or container
         item, resolving any supplied metadata."""
         assert attr is not None or item is not None, "One of attr or item required"
@@ -836,7 +841,7 @@ class SimpleTuberObject:
             obj._resolve_meta(meta)
         return obj
 
-    def _resolve_meta(self, meta: TuberResult):
+    def _resolve_meta(self, meta: dict):
         """Parse metadata packet and recursively resolve all attributes."""
 
         # docstring
@@ -861,7 +866,7 @@ class SimpleTuberObject:
             # rather than manage potentially async calls in what is normally a
             # synchronous context.
             if isinstance(methods, list):
-                with SimpleContext(self, convert_json=True, return_exceptions=False) as ctx:
+                with SimpleContext(self, convert_json=False, return_exceptions=False) as ctx:
                     for m in methods:
                         ctx._add_call(object=self._tuber_objname, property=m)
                     methods = meta["methods"] = dict(zip(methods, ctx()))
@@ -883,8 +888,17 @@ class SimpleTuberObject:
                         ctx._add_call(object=self._tuber_objname, property=m)
                     meta["properties"] = properties = dict(zip(properties, ctx()))
 
+            # properties are really the only place where metadata is exported
+            # directly into a user-visible object. If "convert_json" is True,
+            # we need to ensure any dict-like properties are converted into
+            # TuberResult objects.
+            def recurse(obj: Any) -> Any:
+                if isinstance(obj, dict):
+                    return TuberResult(**{k: recurse(v) for k, v in obj.items()})
+                return obj
+
             for k, v in properties.items():
-                setattr(self, k, v)
+                setattr(self, k, recurse(v) if self._convert_json else v)
 
         # container of objects
         if values := meta.setdefault("values", None):
