@@ -139,26 +139,26 @@ def attribute_blacklisted(name: str):
     return False
 
 
-def tuber_wrapper(func: callable, meta: TuberResult):
+def tuber_wrapper(func: callable, meta: dict):
     """
     Annotate the wrapper function with docstrings and signature.
     """
 
     # Attach docstring, if provided and valid
     try:
-        func.__doc__ = textwrap.dedent(meta.__doc__)
+        func.__doc__ = textwrap.dedent(meta["__doc__"])
     except:
         pass
 
     # Attach a function signature, if provided and valid
     try:
-        if isinstance(meta.__signature__, str):
-            func.__text_signature__ = meta.__signature__
+        if isinstance(meta["__signature__"], str):
+            func.__text_signature__ = meta["__signature__"]
         else:
-            sig = meta.__signature__
-            if not isinstance(sig.parameters[0], inspect.Parameter):
-                sig.parameters = [inspect.Parameter(**vars(p)) for p in sig.parameters]
-            func.__signature__ = inspect.Signature(**vars(sig))
+            sig = meta["__signature__"]
+            if not isinstance(sig["parameters"][0], inspect.Parameter):
+                sig["parameters"] = [inspect.Parameter(**p) for p in sig["parameters"]]
+            func.__signature__ = inspect.Signature(**sig)
     except:
         pass
 
@@ -805,7 +805,7 @@ class SimpleTuberObject:
             except AttributeError:
                 pass
 
-        with self.tuber_context(convert_json=True, return_exceptions=False) as ctx:
+        with self.tuber_context(convert_json=False, return_exceptions=False) as ctx:
             ctx._add_call(object=self._tuber_objname, resolve=True)
             meta = ctx()
             meta = meta[0]
@@ -817,7 +817,7 @@ class SimpleTuberObject:
         """Resolve a remote method call into a callable function"""
 
         def invoke(self, *args, **kwargs):
-            with self.tuber_context() as ctx:
+            with self.tuber_context(convert_json=False) as ctx:
                 r = getattr(ctx, name)(*args, **kwargs)
             return r.result()
 
@@ -840,17 +840,17 @@ class SimpleTuberObject:
         """Parse metadata packet and recursively resolve all attributes."""
 
         # docstring
-        if hasattr(meta, "__doc__"):
-            self.__doc__ = meta.__doc__
+        if doc := meta.get("__doc__", None):
+            self.__doc__ = meta["__doc__"]
 
         # object attributes
-        for objname in getattr(meta, "objects", []) or []:
-            objmeta = getattr(meta.objects, objname)
-            obj = self._resolve_object(attr=objname, meta=objmeta)
-            setattr(self, objname, obj)
+        objects = meta.get("objects", {})
+        for k, v in objects.items():
+            obj = self._resolve_object(attr=k, meta=v)
+            setattr(self, k, obj)
 
         # methods
-        if hasattr(meta, "methods"):
+        if methods := meta.setdefault("methods", {}):
             # backwards compatibility for v0.15 and older: when assembling
             # metadata, older tuberd did not understand the "resolve=True"
             # argument and returned a list of methods as metadata, rather than
@@ -860,37 +860,35 @@ class SimpleTuberObject:
             # To get the job done, we create a transient SimpleTuberObject
             # rather than manage potentially async calls in what is normally a
             # synchronous context.
-            if isinstance(meta.methods, list):
+            if isinstance(methods, list):
                 with SimpleContext(self, convert_json=True, return_exceptions=False) as ctx:
-                    for m in meta.methods:
+                    for m in methods:
                         ctx._add_call(object=self._tuber_objname, property=m)
-                    meta.methods = TuberResult(dict(zip(meta.methods, ctx())))
+                    methods = meta["methods"] = dict(zip(methods, ctx()))
 
-            for methname in meta.methods or {}:
-                method = getattr(meta.methods, methname)
-                if not callable(method):
-                    method = self._resolve_method(methname, method)
+            for k, v in methods.items():
+                if not callable(v):
+                    v = self._resolve_method(k, v)
                     # create method once and bind to each item in a container
-                    setattr(meta.methods, methname, method)
+                    methods[k] = v
 
-                setattr(self, methname, types.MethodType(method, self))
+                setattr(self, k, types.MethodType(v, self))
 
         # static properties
-        if hasattr(meta, "properties"):
+        if properties := meta.setdefault("properties", {}):
             # same workaround as above
-            if isinstance(meta.properties, list):
-                with SimpleContext(self, convert_json=True, return_exceptions=False) as ctx:
-                    for m in meta.properties:
+            if isinstance(properties, list):
+                with SimpleContext(self, convert_json=False, return_exceptions=False) as ctx:
+                    for m in properties:
                         ctx._add_call(object=self._tuber_objname, property=m)
-                    meta.properties = TuberResult(dict(zip(meta.properties, ctx())))
+                    meta["properties"] = properties = dict(zip(properties, ctx()))
 
-            for propname in meta.properties or {}:
-                setattr(self, propname, getattr(meta.properties, propname))
+            for k, v in properties.items():
+                setattr(self, k, v)
 
         # container of objects
-        if hasattr(meta, "values"):
-            values = meta.values
-            keys = getattr(meta, "keys", None)
+        if values := meta.setdefault("values", None):
+            keys = meta.get("keys", None)
             if keys is None or isinstance(keys, int):
                 islist = True
                 if isinstance(keys, int):
@@ -960,7 +958,7 @@ class TuberObject(SimpleTuberObject):
             except AttributeError:
                 pass
 
-        async with self.tuber_context(convert_json=True, return_exceptions=False) as ctx:
+        async with self.tuber_context(convert_json=False, return_exceptions=False) as ctx:
             ctx._add_call(object=self._tuber_objname, resolve=True)
             meta = await ctx()
             meta = meta[0]
@@ -968,7 +966,7 @@ class TuberObject(SimpleTuberObject):
         self._resolve_meta(meta)
 
     @staticmethod
-    def _resolve_method(name: str, meta: TuberResult):
+    def _resolve_method(name: str, meta: dict):
         """Resolve a remote method call into an async callable function"""
 
         async def invoke(self, *args, **kwargs):
