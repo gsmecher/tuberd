@@ -627,12 +627,18 @@ class Context(SimpleContext):
             # hide import for non-library package that may not be invoked
             import aiohttp
 
-            # AsyncResolver does not support mDNS
-            resolver = aiohttp.resolver.ThreadedResolver()
+            # aiohttp.resolver.AsyncResolver does not support mDNS and is the
+            # DefaultResolver. Instead, we try to force the use of an
+            # MDNS-capable async resolver (if available) and use a threaded
+            # fallback that supports mDNS.
+            try:
+                from aiohttp_asyncmdnsresolver.api import AsyncMDNSResolver as Resolver
+            except ImportError:
+                Resolver = aiohttp.resolver.ThreadedResolver
 
             # Monkey-patch tuber session memory handling with the running event loop
             loop._tuber_session = aiohttp.ClientSession(
-                json_serialize=Codecs["json"].encode, connector=aiohttp.TCPConnector(resolver=resolver)
+                json_serialize=Codecs["json"].encode, connector=aiohttp.TCPConnector(resolver=Resolver())
             )
 
             # Ensure that ClientSession.close() is called when the loop is
