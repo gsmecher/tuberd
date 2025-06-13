@@ -744,6 +744,16 @@ class SimpleTuberObject:
 
     @property
     def is_container(self):
+        warnings.warn(
+            "Please replace TuberObject.is_container with "
+            "TuberObject.tuber_is_container - this maintains "
+            "namespace separation",
+            DeprecationWarning,
+        )
+        return self.tuber_is_container
+
+    @property
+    def tuber_is_container(self):
         """True if object is a container (list or dict) of remote items,
         otherwise False if resolved or None if not resolved."""
         if hasattr(self, "_tuber_meta"):
