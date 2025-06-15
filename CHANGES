@@ -1,3 +1,27 @@
+v0.18
+=====
+
+Released 2025-06-13
+
+- Adds "convert_json" support to prevent dict results from being converted
+  into TuberResult objects. This is an optional setting for those who prefer
+  dict["like"]["APIs"] to the current object.like.API.
+
+- Replaces the underlying "TuberResult" objects with SimpleNamespace objects.
+  This is part of an ongoing effort to make the Tuber codebase less special
+  where it doesn't need to be special.
+
+- Python 3.8 support has been removed.
+
+- When remote exceptions occur inside a chain of RPC calls in a Context,
+  it's now possible to return them "in-band" (as list elements) rather than
+  "out-of-band" (as an exception, which interrupts control flow). This is an
+  optional setting and does not affect default behaviour.
+
+- Mandate use of mDNS-capable resolver (either aiohttp_asyncmdnsresolver if
+  available, falling back on ThreadedResolver.) aiohttp's DefaultResolver is
+  AsyncResolver under some conditions (and that resolver doesn't support mDNS.)
+
 v0.17
 =====
 
