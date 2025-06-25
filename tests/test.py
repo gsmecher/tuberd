@@ -32,6 +32,11 @@ class ObjectWithMethod:
         return "expected return value"
 
 
+class ObjectWithDictMethod:
+    def method(self):
+        return {"a": "expected return value", "b": "expected return value"}
+
+
 class ObjectWithProperty:
     PROPERTY = "expected property value"
 
@@ -105,6 +110,7 @@ class WarningsClass:
 registry = {
     "NullObject": NullObject(),
     "ObjectWithMethod": ObjectWithMethod(),
+    "ObjectWithDictMethod": ObjectWithDictMethod(),
     "ObjectWithProperty": ObjectWithProperty(),
     "ObjectWithPrivateMethod": ObjectWithPrivateMethod(),
     "ObjectWithContainerProperties": ObjectWithContainerProperties(),
@@ -364,11 +370,11 @@ def accept_types(request):
 
 @pytest.fixture(scope="module", params=["simple", "async"])
 def resolve(request, tuberd_host, accept_types):
-    async def resolver(objname=None):
+    async def resolver(objname=None, convert_json=None):
         if request.param == "simple":
-            return tuber.resolve_simple(tuberd_host, objname, accept_types)
+            return tuber.resolve_simple(tuberd_host, objname, accept_types, convert_json=convert_json)
         else:
-            return await tuber.resolve(tuberd_host, objname, accept_types)
+            return await tuber.resolve(tuberd_host, objname, accept_types, convert_json=convert_json)
 
     return resolver
 
@@ -725,3 +731,17 @@ async def test_tuberpy_container_properties(resolve):
 
     assert len(r2) == len(mobjs)
     assert all([x == "expected return value" for x in r2])
+
+
+@pytest.mark.asyncio
+async def test_tuberpy_method(resolve):
+    """Check method return types"""
+    s1 = await resolve(convert_json=True)
+    r1 = await tuber_result(s1.ObjectWithDictMethod.method())
+    assert r1.a == "expected return value"
+    assert r1.b == "expected return value"
+
+    s2 = await resolve(convert_json=False)
+    r2 = await tuber_result(s2.ObjectWithDictMethod.method())
+    assert r2["a"] == "expected return value"
+    assert r2["b"] == "expected return value"

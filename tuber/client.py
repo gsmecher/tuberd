@@ -821,7 +821,7 @@ class SimpleTuberObject:
         """Resolve a remote method call into a callable function"""
 
         def invoke(self, *args, **kwargs):
-            with self.tuber_context(convert_json=False) as ctx:
+            with self.tuber_context() as ctx:
                 r = getattr(ctx, name)(*args, **kwargs)
             return r.result()
 
