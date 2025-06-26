@@ -1,3 +1,10 @@
+v0.18.1
+=======
+
+Released 2025-06-26
+
+- Fixes convert_json=False behaviour with SimpleTuberContext. (Fixes #3)
+
 v0.18
 =====
 
