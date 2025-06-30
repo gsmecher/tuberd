@@ -5,6 +5,8 @@ import inspect
 import os
 import warnings
 import functools
+import sys
+import traceback
 
 from .codecs import Codecs
 from . import schema
@@ -544,8 +546,11 @@ class RequestHandler:
         with warnings.catch_warnings(record=True) as wlist:
             try:
                 response = result_response(method(*args, **kwargs))
-            except Exception as e:
-                response = error_response(e)
+            except Exception:
+                # exclude this frame from exception traceback
+                t, v, tb = sys.exc_info()
+                message = "".join(traceback.format_exception(t, v, tb.tb_next))
+                response = error_response(message)
 
             if len(wlist):
                 response["warnings"] = [str(w.message) for w in wlist]
