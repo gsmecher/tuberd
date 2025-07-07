@@ -1,3 +1,10 @@
+v0.18.2
+=======
+
+Released 2025-07-07
+
+- Pass through trace-backs for server-side exceptions
+
 v0.18.1
 =======
 
