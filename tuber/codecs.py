@@ -13,8 +13,12 @@ except ImportError:
 # Prefer SimpleJSON, but fall back on built-in
 try:
     import simplejson as json
+
+    have_simplejson = True
 except ImportError:
     import json  # type: ignore[no-redef]
+
+    have_simplejson = False
 
 try:
     import orjson
@@ -165,6 +169,8 @@ def decode_json(response_data, **kwargs):
 
 
 def encode_json(obj, **kwargs):
+    if have_simplejson:
+        kwargs.setdefault("encoding", None)
     return json.dumps(obj, default=wrap_bytes_for_json, **kwargs)
 
 
