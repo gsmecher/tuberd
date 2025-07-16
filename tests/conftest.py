@@ -86,7 +86,7 @@ def tuber_call(request, tuberd_host):
     URI = f"http://{tuberd_host}/tuber"
 
     accept = f"application/{request.param}"
-    loads = codecs.Codecs[request.param].decode
+    loads = lambda d: codecs.AcceptTypes[accept](d, encoding="utf-8", convert=False)
 
     # The tuber daemon can take a little while to start (in particular, it
     # sources this script as a registry) - rather than adding a magic sleep to
