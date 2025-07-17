@@ -2,22 +2,46 @@
 	pybind11/str_enum.h: Declaration and conversion enums as Enum objects.
 
 	Copyright (c) 2020 Ashley Whetter <ashley@awhetter.co.uk>
-	Copyright (c) 2022 Graeme Smecher <gsmecher@threespeedlogic.com>
+	Copyright (c) 2022-2025 Graeme Smecher <gsmecher@threespeedlogic.com>
 
 	All rights reserved. Use of this source code is governed by a
 	BSD-style license that can be found in the LICENSE.pybind11 file.
 
 	Adapted from https://github.com/pybind/pybind11/pull/2704
+
+	As of pybind11 3.0, there's a native_enum option instead of this
+	str_enum implementation. Unfortunately, it's not useful for us - worse,
+	it takes some effort to work around. You are free to try it out.
+
+	Because this header /only/ provides a str_enum implementation, you're
+	free to opt out.
 */
 
 #pragma once
 
+/* With pybind11 3+, we need to control the pybind11 #include order carefully.
+ * The easiest way is to manage it ourselves, and insist that users #include
+ * us instead. */
+#if defined(PYBIND11_VERSION_MAJOR)
+# error "Please #include tuber_support.hpp instead of #including pybind11 directly."
+#endif
+
+/* Disable pybind11's enum casters */
 #include <pybind11/detail/common.h>
+#include <pybind11/cast.h>
+#if defined(PYBIND11_HAS_NATIVE_ENUM)
+namespace pybind11::detail {
+	template <typename EnumType>
+	struct type_caster_enum_type_enabled<EnumType, void> : std::false_type {};
+}
+#endif
+
+/* And finish the #include */
 #include <pybind11/pybind11.h>
+#include <pybind11/stl.h>
 
 namespace PYBIND11_NAMESPACE {
 	namespace detail {
-
 		template<typename U>
 		struct enum_mapper {
 			handle type = {};
@@ -190,5 +214,4 @@ namespace PYBIND11_NAMESPACE {
 			py_entries[name] = cast(name);
 		}
 	};
-
 } /* namespace pybind11 */
