@@ -58,6 +58,7 @@ class Types:
     FLOAT = 0.1234
     LIST = [1, 2, 3, 4]
     DICT = {"1": "2", "3": "4"}
+    BYTES = b"abc"
 
     # Properties are also exposed as default arguments to functions
     def string_function(self, arg=STRING):
@@ -79,6 +80,9 @@ class Types:
     def dict_function(self, arg=DICT):
         assert isinstance(arg, dict)
         return arg
+
+    def bytes_function(self, arg=None):
+        return self.BYTES
 
 
 class NumPy:
@@ -197,6 +201,7 @@ def test_property_types(tuber_call):
     assert tuber_call(object="Types", property="FLOAT") == Succeeded(pytest.approx(Types.FLOAT))
     assert tuber_call(object="Types", property="LIST") == Succeeded(Types.LIST)
     assert tuber_call(object="Types", property="DICT") == Succeeded(Types.DICT)
+    assert tuber_call(object="Types", property="BYTES") == Succeeded(Types.BYTES)
 
 
 def test_function_types_with_default_arguments(tuber_call):
@@ -205,6 +210,7 @@ def test_function_types_with_default_arguments(tuber_call):
     assert tuber_call(object="Types", method="float_function") == Succeeded(pytest.approx(Types.FLOAT))
     assert tuber_call(object="Types", method="list_function") == Succeeded(Types.LIST)
     assert tuber_call(object="Types", method="dict_function") == Succeeded(Types.DICT)
+    assert tuber_call(object="Types", method="bytes_function") == Succeeded(Types.BYTES)
 
 
 def test_function_types_with_correct_argument_types(tuber_call):
