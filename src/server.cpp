@@ -111,20 +111,41 @@ class DLL_LOCAL file_resource : public http_resource {
 			if(fs::is_directory(path) && fs::is_regular_file(path / "index.html"))
 				path /= "index.html";
 
-			/* Serve 404 if the resource does not exist, or we couldn't find it */
-			if(!fs::is_regular_file(path))
-				return std::make_shared<string_response>("No such file or directory.\n", http::http_utils::http_not_found);
-
-			/* Figure out a MIME type to use */
 			std::string mime_type = MIME_DEFAULT;
-			auto it = MIME_TYPES.find(path.extension().string());
-			if(it != MIME_TYPES.end())
-				mime_type = it->second;
+			std::string compressed_encoding; //default to empty
+
+			/* Serve 404 if the resource does not exist, or we couldn't find it */
+			if(!fs::is_regular_file(path)){
+				/* As a fallback, if the request says that gzip compressed transfers are acceptable,
+				 * and we can find a file of the expected name with a '.gz' suffix, send that. */
+				auto accept_header = req.get_header("Accept-Encoding");
+				auto compressed_path = path;
+				compressed_path.concat(".gz");
+				if(!accept_header.empty() && accept_header.find("gzip")!=std::string::npos &&
+				   fs::is_regular_file(compressed_path)) {
+					/* use the original file extension to guess the data type! */
+					auto it = MIME_TYPES.find(path.extension().string());
+					if(it != MIME_TYPES.end())
+						mime_type = it->second;
+					path = compressed_path;
+					compressed_encoding = "gzip";
+				}
+				else
+					return std::make_shared<string_response>("No such file or directory.\n", http::http_utils::http_not_found);
+			}
+			else{
+				auto it = MIME_TYPES.find(path.extension().string());
+				if(it != MIME_TYPES.end())
+					mime_type = it->second;
+			}
 
 			/* Construct response and return it */
 			auto response = std::make_shared<file_response>(path.string(), http::http_utils::http_ok, mime_type);
 			response->with_header(http::http_utils::http_header_cache_control, 
 			                      "max-age="+std::to_string(max_age));
+			if(!compressed_encoding.empty())
+				response->with_header(http::http_utils::http_header_content_encoding, 
+				                      compressed_encoding);
 			return response;
 		}
 	private:
