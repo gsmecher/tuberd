@@ -25,34 +25,44 @@ class CMakeExtension(Extension):
         self.sourcedir = os.fspath(Path(sourcedir).resolve())
 
 
+cmake_args = []
+include_tests = True
+
+# Adding CMake arguments set as environment variable
+if "CMAKE_ARGS" in os.environ:
+    cmake_args += [item for item in os.environ["CMAKE_ARGS"].split(" ") if item]
+
+# sensible defaults
+if not any(["Python_ROOT_DIR" in a for a in cmake_args]):
+    pyroot = sysconfig.get_config_var("prefix")
+    cmake_args += [f"-DPython_ROOT_DIR={pyroot}"]
+
+if not any(["pybind11_DIR" in a for a in cmake_args]):
+    pbdir = pybind11.get_cmake_dir()
+    cmake_args += [f"-Dpybind11_DIR={pbdir}"]
+
+for arg in cmake_args:
+    if "BUILD_TESTING" in arg:
+        print(f"Found testing arg: {arg}")
+        m = re.match("-DBUILD_TESTING=(.+)", arg)
+        if m:
+            include_tests = m.group(1).upper() in ["1", "ON", "YES", "TRUE", "Y"]
+
+
 class CMakeBuild(build_ext):
     def build_extension(self, ext: CMakeExtension) -> None:
         if (sys.platform != "linux") and (not sys.platform.startswith("darwin")):
             raise DistutilsPlatformError("Cannot compile tuberd on non-Linux platform!")
-
-        cmake_args = []
-
-        # Adding CMake arguments set as environment variable
-        if "CMAKE_ARGS" in os.environ:
-            cmake_args += [item for item in os.environ["CMAKE_ARGS"].split(" ") if item]
-
-        # sensible defaults
-        if not any(["Python_ROOT_DIR" in a for a in cmake_args]):
-            pyroot = sysconfig.get_config_var("prefix")
-            cmake_args += [f"-DPython_ROOT_DIR={pyroot}"]
-
-        if not any(["pybind11_DIR" in a for a in cmake_args]):
-            pbdir = pybind11.get_cmake_dir()
-            cmake_args += [f"-Dpybind11_DIR={pbdir}"]
 
         build_temp = Path(self.build_temp)
         if not build_temp.exists():
             build_temp.mkdir(parents=True)
 
         rtlib = build_temp / self.get_ext_filename("_tuber_runtime")
-        tmlib = build_temp / self.get_ext_filename("test_module")
+        if include_tests:
+            tmlib = build_temp / self.get_ext_filename("test_module")
 
-        if not rtlib.exists() or not tmlib.exists():
+        if not rtlib.exists() or (include_tests and not tmlib.exists()):
             # build once
             subprocess.run(["cmake", ext.sourcedir, *cmake_args], cwd=build_temp, check=True)
             subprocess.run(["cmake", "--build", "."], cwd=build_temp, check=True)
@@ -63,11 +73,12 @@ class CMakeBuild(build_ext):
                 tuber_lib.mkdir(parents=True)
             self.copy_file(rtlib, tuber_lib)
 
-            # add test module
-            test_lib = tuber_lib / "tests"
-            if not test_lib.exists():
-                test_lib.mkdir(parents=True)
-            self.copy_file(tmlib, test_lib)
+            if include_tests:
+                # add test module
+                test_lib = tuber_lib / "tests"
+                if not test_lib.exists():
+                    test_lib.mkdir(parents=True)
+                self.copy_file(tmlib, test_lib)
 
 
 class CMakeInstallHeaders(install):
@@ -90,17 +101,22 @@ class CMakeInstallHeaders(install):
                 self.copy_file(os.path.join(headers_src, header), os.path.join(headers_dst, header))
 
 
+modules = [CMakeExtension("tuber._tuber_runtime")]
+packages = ["tuber"]
+package_dirs = {"tuber": "./tuber"}
+if include_tests:
+    modules.append(CMakeExtension("tuber.tests.test_module"))
+    packages.append("tuber.tests")
+    package_dirs["tuber.tests"] = "./tests"
+
 setup(
-    ext_modules=[CMakeExtension("tuber._tuber_runtime"), CMakeExtension("tuber.tests.test_module")],
+    ext_modules=modules,
     cmdclass={
         "build_ext": CMakeBuild,
         "install": CMakeInstallHeaders,
     },
-    packages=["tuber", "tuber.tests"],
-    package_dir={
-        "tuber": "./tuber",
-        "tuber.tests": "./tests",
-    },
+    packages=packages,
+    package_dir=package_dirs,
     package_data={"tuber": ["include/*.hpp"]},
     entry_points={"console_scripts": ["tuberd = tuber.server:main"]},
 )

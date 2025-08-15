@@ -38,22 +38,25 @@ pybind11_add_module(_tuber_runtime MODULE src/server.cpp)
 target_include_directories(_tuber_runtime PUBLIC ${LIBHTTPSERVER_INCLUDE_DIRS})
 target_link_libraries(_tuber_runtime PUBLIC ${LIBHTTPSERVER_LIBRARIES} Threads::Threads)
 
-pybind11_add_module(test_module MODULE tests/test_module.cpp)
-target_include_directories(test_module PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+if(BUILD_TESTING)
+	message(STATUS "Building tests")
+	pybind11_add_module(test_module MODULE tests/test_module.cpp)
+	target_include_directories(test_module PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
-add_test(NAME test-native-json
-	WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-	COMMAND tests/test.py)
+	add_test(NAME test-native-json
+		WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+		COMMAND tests/test.py)
 
-add_test(NAME test-orjson-fastpath
-	WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-	COMMAND tests/test.py --orjson)
+	add_test(NAME test-orjson-fastpath
+		WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+		COMMAND tests/test.py --orjson)
 
-add_test(NAME test-doctests
-	WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-	COMMAND python3 -m pytest tuber --doctest-modules)
+	add_test(NAME test-doctests
+		WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+		COMMAND python3 -m pytest tuber --doctest-modules)
 
-set_tests_properties(test-native-json test-orjson-fastpath
-	PROPERTIES ENVIRONMENT "CMAKE_TEST=1;PATH=${CMAKE_BINARY_DIR}:$ENV{PATH};PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}")
+	set_tests_properties(test-native-json test-orjson-fastpath
+		PROPERTIES ENVIRONMENT "CMAKE_TEST=1;PATH=${CMAKE_BINARY_DIR}:$ENV{PATH};PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}")
+endif(BUILD_TESTING)
 
 install(FILES "include/tuber_support.hpp" DESTINATION include)
