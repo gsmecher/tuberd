@@ -160,11 +160,11 @@ option, for example:
    CMAKE_ARGS="-DCMAKE_MODULE_PATH=/usr/local/share/cmake/Modules" pip install tuberd
 
 Optional dependencies may be installed to enable alternative encoding schemes (cbor, orjson)
-with and without numpy support, or the asyncio-enabled client interface:
+with and without numpy support, or the standard or asyncio-enabled client interface:
 
 .. code:: bash
 
-   pip install tuberd[async,cbor,numpy,orjson]
+   pip install tuberd[client,async,cbor,numpy,orjson]
 
 To run the test suite, install the development dependencies:
 
