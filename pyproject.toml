@@ -21,15 +21,15 @@ classifiers=[
     "Operating System :: OS Independent",
 ]
 license = "BSD-3-Clause"
-dependencies = ["requests", "requests-futures"]
 dynamic = ["version", "scripts"]
 
 [project.optional-dependencies]
-async = ["aiohttp"]
+client = ["requests", "requests-futures"]
+async = ["aiohttp", "requests", "requests-futures"]
 cbor = ["cbor2"]
 numpy = ["numpy"]
 orjson = ["orjson"]
-dev = ["aiohttp", "cbor2", "jsonschema", "numpy", "orjson", "pytest", "pytest-asyncio"]
+dev = ["aiohttp", "cbor2", "jsonschema", "numpy", "orjson", "pytest", "pytest-asyncio", "requests", "requests-futures"]
 
 [tool.setuptools_scm]
 write_to = "tuber/_version.py"
