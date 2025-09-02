@@ -1,3 +1,27 @@
+v0.18.3
+=======
+
+Released 2025-09-02
+
+New features:
+
+- Added support for transparent gzip compression
+Bug fixes:
+
+- Pybind11 3.x fixes for str_enum
+
+- tuberd: Unify simplejson/json/cbor treatment of bytes objects (simplejson
+  encodes bytes using utf-8 by default, which doesn't match either of the other
+  two encoders)
+
+Distribution / CI / CD:
+
+- CI/CD: Linux/x84 packages are now built natively
+
+- tuberd: tests are no longer installed by default
+
+- tuberd: Python requests, requests-futures are no longer pre-requisites
+
 v0.18.2
 =======
 
