@@ -33,7 +33,7 @@ def error_response(message):
     return {"error": {"message": message}}
 
 
-def resolve_method(method):
+def resolve_method(method, bound=True):
     """
     Return a description of a method.
     """
@@ -62,16 +62,6 @@ def resolve_method(method):
             code = compile(f"def sigfunc{sig}:\n pass", "sigfunc", "single")
             exec(code, globals())
             sig = inspect.signature(sigfunc)
-            params = list(sig.parameters.values())
-            p0 = params[0] if len(params) else None
-            # add self argument for unbound method
-            if not p0 or p0.name != "self":
-                if p0 and p0.kind == inspect.Parameter.POSITIONAL_ONLY:
-                    kind = p0.kind
-                else:
-                    kind = inspect.Parameter.POSITIONAL_OR_KEYWORD
-                parself = inspect.Parameter("self", kind)
-                sig = sig.replace(parameters=[parself] + params)
         except:
             sig = None
 
@@ -90,6 +80,18 @@ def resolve_method(method):
             if par.annotation != par.empty:
                 p["annotation"] = str(par.annotation)
             params.append(p)
+
+        # add self argument for unbound method
+        if bound:
+            p0 = params[0] if len(params) else None
+            if not p0 or p0["name"] != "self":
+                if p0 and p0["kind"] == int(inspect.Parameter.POSITIONAL_ONLY):
+                    kind = p0["kind"]
+                else:
+                    kind = int(inspect.Parameter.POSITIONAL_OR_KEYWORD)
+                parself = {"name": "self", "kind": kind}
+                params.insert(0, parself)
+
         sout["parameters"] = params
         out["__signature__"] = sout
 
@@ -144,7 +146,13 @@ def resolve_object(obj, recursive=True):
             if getattr(attr, "__tuber_object__", False):
                 objects[d] = resolve_object(attr)
             elif callable(attr):
-                methods[d] = resolve_method(attr)
+                bound = True
+                try:
+                    attr = getattr(obj.__class__, d)
+                    bound = False
+                except AttributeError:
+                    pass
+                methods[d] = resolve_method(attr, bound=bound)
             else:
                 props[d] = attr
         else:
