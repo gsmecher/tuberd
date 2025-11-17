@@ -766,6 +766,9 @@ class SimpleTuberObject:
         if self._tuber_resolved:
             return hasattr(self, "_items")
 
+    def __repr__(self):
+        return f"{self.__class__.__name__}({self._tuber_objname!r}, hostname={self._tuber_host!r})"
+
     def __getattr__(self, name: str):
         # Useful hint
         raise AttributeError(f"'{self._tuber_objname}' has no attribute '{name}'.  Did you run tuber_resolve()?")
