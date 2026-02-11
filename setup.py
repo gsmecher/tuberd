@@ -64,8 +64,11 @@ class CMakeBuild(build_ext):
 
         if not rtlib.exists() or (include_tests and not tmlib.exists()):
             # build once
-            subprocess.run(["cmake", ext.sourcedir, *cmake_args], cwd=build_temp, check=True)
-            subprocess.run(["cmake", "--build", "."], cwd=build_temp, check=True)
+            subprocess.run(
+                ["cmake", "-S", ext.sourcedir, "-B", str(build_temp), *cmake_args],
+                check=True,
+            )
+            subprocess.run(["cmake", "--build", str(build_temp)], check=True)
 
             # add server module
             tuber_lib = Path(self.build_lib) / "tuber"
