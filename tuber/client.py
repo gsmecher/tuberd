@@ -14,7 +14,6 @@ import functools
 from . import TuberError, TuberStateError, TuberRemoteError
 from .codecs import AcceptTypes, Codecs, TuberResult
 
-
 __all__ = [
     "TuberObject",
     "SimpleTuberObject",
@@ -351,7 +350,7 @@ class SimpleContext:
         calls = []
         futures = []
         while self.calls:
-            (c, f) = self.calls.pop(0)
+            c, f = self.calls.pop(0)
 
             calls.append(c)
             futures.append(f)
@@ -617,7 +616,7 @@ class Context(SimpleContext):
         calls = []
         futures = []
         while self.calls:
-            (c, f) = self.calls.pop(0)
+            c, f = self.calls.pop(0)
 
             calls.append(c)
             futures.append(f)
