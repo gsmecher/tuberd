@@ -248,6 +248,7 @@ class SimpleContext:
         accept_types: list[str] | None = None,
         convert_json: bool | None = None,
         return_exceptions: bool | None = None,
+        timeout: float | None = None,
         **ctx_kwargs,
     ):
         """
@@ -266,6 +267,8 @@ class SimpleContext:
             If False (default), raise the exception when parsing the server response.
             This default may be overridden in the context construction or in each
             individual context call.
+        timeout : float
+            HTTP request timeout in seconds.  If None, fall back to the object default.
         ctx_kwargs :
             Any remaining keyword arguments are added as additional keywords to any
             method call made by this context.
@@ -288,6 +291,9 @@ class SimpleContext:
         if return_exceptions is None:
             return_exceptions = self.obj._return_exceptions
         self.return_exceptions = False if return_exceptions is None else return_exceptions
+        if timeout is None:
+            timeout = self.obj._timeout
+        self.timeout = timeout
         self.ctx_kwargs = ctx_kwargs
         self.container = {}
 
@@ -376,7 +382,10 @@ class SimpleContext:
 
         # Create a HTTP request to complete the call.
         # Returns a Future whose result has been processed by the response hook.
-        return cs.post(self.uri, json=calls, headers=headers, hooks={"response": hook})
+        post_kwargs = dict(json=calls, headers=headers, hooks={"response": hook})
+        if self.timeout is not None:
+            post_kwargs["timeout"] = self.timeout
+        return cs.post(self.uri, **post_kwargs)
 
     @staticmethod
     def _parse_json(json_out, futures: list, converted: bool, return_exceptions: bool):
@@ -622,9 +631,10 @@ class Context(SimpleContext):
             futures.append(f)
 
         loop = asyncio.get_running_loop()
+        # hide import for non-library package that may not be invoked
+        import aiohttp
+
         if not hasattr(loop, "_tuber_session"):
-            # hide import for non-library package that may not be invoked
-            import aiohttp
 
             # aiohttp.resolver.AsyncResolver does not support mDNS and is the
             # DefaultResolver. Instead, we try to force the use of an
@@ -669,7 +679,10 @@ class Context(SimpleContext):
         # Create a HTTP request to complete the call. This is a coroutine,
         # so we queue the call and then suspend execution (via 'yield')
         # until it's complete.
-        async with cs.post(self.uri, json=calls, headers=headers) as resp:
+        post_kwargs = dict(json=calls, headers=headers)
+        if self.timeout is not None:
+            post_kwargs["timeout"] = aiohttp.ClientTimeout(total=self.timeout)
+        async with cs.post(self.uri, **post_kwargs) as resp:
             raw_out = await resp.read()
             if not resp.ok:
                 try:
@@ -708,6 +721,7 @@ class SimpleTuberObject:
         accept_types: list[str] | None = None,
         convert_json: bool | None = None,
         return_exceptions: bool | None = None,
+        timeout: float | None = None,
         parent: "SimpleTuberObject" | None = None,
     ):
         """
@@ -731,6 +745,9 @@ class SimpleTuberObject:
             raised as exceptions.  Otherwise, fall back to context default.  This
             default may be overridden in the context construction or in each
             individual context call.
+        timeout : float
+            HTTP request timeout in seconds.  If None, no timeout is applied.
+            This default may be overridden in the context construction.
         parent: SimpleTuberObject
             If given, assume this object is an attribute of this parent object.
         """
@@ -742,11 +759,13 @@ class SimpleTuberObject:
             self._accept_types = accept_types
             self._convert_json = convert_json
             self._return_exceptions = return_exceptions
+            self._timeout = timeout
         else:
             self._tuber_host = parent._tuber_host
             self._accept_types = parent._accept_types
             self._convert_json = parent._convert_json
             self._return_exceptions = parent._return_exceptions
+            self._timeout = parent._timeout
 
     @property
     def is_container(self):
