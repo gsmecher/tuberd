@@ -8,7 +8,6 @@ import re
 import subprocess
 import sys
 import sysconfig
-import pybind11
 from pathlib import Path
 
 from setuptools import Extension, setup
@@ -38,6 +37,8 @@ if not any(["Python_ROOT_DIR" in a for a in cmake_args]):
     cmake_args += [f"-DPython_ROOT_DIR={pyroot}"]
 
 if not any(["pybind11_DIR" in a for a in cmake_args]):
+    import pybind11
+
     pbdir = pybind11.get_cmake_dir()
     cmake_args += [f"-Dpybind11_DIR={pbdir}"]
 
