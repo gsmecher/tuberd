@@ -14,6 +14,10 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        cbor2: ["<6", ">=6"]
 
     steps:
     - uses: actions/checkout@v4
@@ -27,6 +31,9 @@ jobs:
 
     - name: Install Python dependencies
       uses: py-actions/py-dependency-install@v4
+
+    - name: Pin cbor2 version (matrix)
+      run: pip install "cbor2${{ matrix.cbor2 }}"
 
     - name: Install C++ dependencies
       run: |
