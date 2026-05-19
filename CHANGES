@@ -1,3 +1,14 @@
+v0.18.4
+=======
+
+Released 2026-05-19
+
+- Allow HTTP timeout to be specified across the API (via TuberObject, tuber_context)
+- Fix "self" argument in function signatures
+- Add useful string __repr__  for TuberObjects
+
+There are a few CI/CD chores included in this release as well.
+
 v0.18.3
 =======
 
