@@ -29,10 +29,13 @@ except ImportError:
 
 try:
     import cbor2
+    import importlib.metadata
 
     have_cbor = True
+    _cbor2_version = tuple(int(p) for p in importlib.metadata.version("cbor2").split(".")[:2])
 except ImportError:
     have_cbor = False
+    _cbor2_version = (0, 0)
 
 
 class TuberResult(types.SimpleNamespace):
@@ -107,8 +110,7 @@ def cbor_encode_ndarray(enc, arr):
     enc.encode_length(6, type_tag)
     # the typed array payload is a bytestring (type 2)
     enc.encode_length(2, arr.nbytes)
-    # call write directly on the stream object to avoid unnecessary copies
-    enc.fp.write(arr.data)
+    enc.write(arr.tobytes())
 
 
 def cbor_augment_encode(enc, obj):
@@ -118,7 +120,16 @@ def cbor_augment_encode(enc, obj):
     raise cbor2.CBOREncodeTypeError(f"Unsupported object for CBOR encoding {type(obj)}")
 
 
-def cbor_tag_decode(dec, tag):
+# cbor2 6.0 made several breaking changes:
+#   - dropped CBORDecodeValueError (use the parent CBORDecodeError instead)
+#   - changed tag_hook from (decoder, tag) to (tag, immutable)
+#   - changed object_hook from (decoder, dict) to (dict, immutable)
+#   - enc.fp is None during dumps() (use enc.write() instead, which exists in both)
+_CBOR2_V6 = have_cbor and _cbor2_version >= (6, 0)
+_CBORDecodeValueError = cbor2.CBORDecodeError if _CBOR2_V6 else cbor2.CBORDecodeValueError if have_cbor else Exception
+
+
+def cbor_tag_decode(tag):
     if have_numpy and tag.tag >= 64 and tag.tag <= 87 and tag.tag != 76:  # Typed arrays
         is_float = tag.tag & 0x10
         is_signed = tag.tag & 0x8
@@ -130,7 +141,7 @@ def cbor_tag_decode(dec, tag):
         # due to the cap of 87 on the tag, we will never see invalid 'signed' float combinations
         dt = numpy.dtype(f"{'<' if is_le else '>'}{'f' if is_float else 'i' if is_signed else 'u'}{element_size}")
         if len(tag.value) % element_size != 0:
-            raise cbor2.CBORDecodeValueError(
+            raise _CBORDecodeValueError(
                 f"Invalid data size ({len(tag.value)}) for typed array with tag {tag.tag}, interpreted as {dt}"
             )
         # create a 1-D, row-major array to contain all of the data, which can have more detailed
@@ -141,11 +152,11 @@ def cbor_tag_decode(dec, tag):
         return arr
     if have_numpy and (tag.tag == 40 or tag.tag == 1040):
         if not isinstance(tag.value, Sequence):
-            raise cbor2.CBORDecodeValueError(f"Invalid raw data for multi-dimensional array tag ({tag.tag})")
+            raise _CBORDecodeValueError(f"Invalid raw data for multi-dimensional array tag ({tag.tag})")
         if len(tag.value) != 2:
-            raise cbor2.CBORDecodeValueError(f"Invalid raw array length for multi-dimensional array tag ({tag.tag})")
+            raise _CBORDecodeValueError(f"Invalid raw array length for multi-dimensional array tag ({tag.tag})")
         if not isinstance(tag.value[0], Sequence) or not isinstance(tag.value[1], numpy.ndarray):
-            raise cbor2.CBORDecodeValueError(f"Invalid raw data for multi-dimensional array tag ({tag.tag})")
+            raise _CBORDecodeValueError(f"Invalid raw data for multi-dimensional array tag ({tag.tag})")
         arr = tag.value[1].reshape(tag.value[0], order="C" if tag.tag == 40 else "F")
         return arr
     return None
@@ -211,8 +222,16 @@ AcceptTypes["application/json"] = decode_json_client
 # Use cbor2 to handle CBOR, if available
 if have_cbor:
 
+    # Adapt the (tag,) -> value tag handler to the version-specific tag_hook signature.
+    if _CBOR2_V6:
+        _tag_hook = lambda tag, immutable: cbor_tag_decode(tag)
+        _obj_hook_convert = lambda data, immutable: TuberResult(**data)
+    else:
+        _tag_hook = lambda dec, tag: cbor_tag_decode(tag)
+        _obj_hook_convert = lambda dec, data: TuberResult(**data)
+
     def decode_cbor(response_data, **kwargs):
-        return cbor2.loads(response_data, tag_hook=cbor_tag_decode, **kwargs)
+        return cbor2.loads(response_data, tag_hook=_tag_hook, **kwargs)
 
     def encode_cbor(obj, **kwargs):
         return cbor2.dumps(obj, default=cbor_augment_encode, **kwargs)
@@ -222,6 +241,6 @@ if have_cbor:
     def decode_cbor_client(response_data, encoding, convert=True):
         if not convert:
             return decode_cbor(response_data)
-        return decode_cbor(response_data, object_hook=lambda dec, data: TuberResult(**data))
+        return decode_cbor(response_data, object_hook=_obj_hook_convert)
 
     AcceptTypes["application/cbor"] = decode_cbor_client
