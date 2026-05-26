@@ -1,7 +1,8 @@
 from tuber import resolve_simple
 
 # create a connection to the running server
-obj = resolve_simple("localhost", "driver")
+# the port number here must match the port used to start the server
+obj = resolve_simple("localhost:8080", "driver")
 
 # call methods of the driver class
 button_value = obj.get_button()
