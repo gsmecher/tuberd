@@ -372,6 +372,8 @@ class SimpleContext:
 
         # Declare the media types we want to allow getting back
         headers = {"Accept": ", ".join(self.accept_types)}
+        if return_exceptions is None:
+            return_exceptions = self.return_exceptions
         if return_exceptions:
             headers["X-Tuber-Options"] = "continue-on-error"
 

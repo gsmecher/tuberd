@@ -376,11 +376,15 @@ def accept_types(request):
 
 @pytest.fixture(scope="module", params=["simple", "async"])
 def resolve(request, tuberd_host, accept_types):
-    async def resolver(objname=None, convert_json=None):
+    async def resolver(objname=None, convert_json=None, return_exceptions=None):
         if request.param == "simple":
-            return tuber.resolve_simple(tuberd_host, objname, accept_types, convert_json=convert_json)
+            return tuber.resolve_simple(
+                tuberd_host, objname, accept_types, convert_json=convert_json, return_exceptions=return_exceptions
+            )
         else:
-            return await tuber.resolve(tuberd_host, objname, accept_types, convert_json=convert_json)
+            return await tuber.resolve(
+                tuberd_host, objname, accept_types, convert_json=convert_json, return_exceptions=return_exceptions
+            )
 
     return resolver
 
@@ -637,7 +641,7 @@ def test_tuberpy_fake_async(accept_types, tuberd_host):
 @pytest.mark.asyncio
 async def test_tuberpy_return_exceptions(return_exceptions, resolve):
     """Ensure errors are turned into warnings"""
-    s = await resolve()
+    s = await resolve(return_exceptions=return_exceptions)
 
     with pytest.warns(match="This is a warning"):
         async with tuber_context(s) as ctx:
@@ -653,7 +657,7 @@ async def test_tuberpy_return_exceptions(return_exceptions, resolve):
                     await tuber_result(r3)
 
             else:
-                [r1b, r2b, r3b] = await ctx(return_exceptions=True)
+                [r1b, r2b, r3b] = await ctx()
                 with pytest.raises(tuber.TuberRemoteError):
                     await tuber_result(r2)
                 r3 = await tuber_result(r3)
