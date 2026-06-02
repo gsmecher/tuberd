@@ -3,10 +3,17 @@
 
 class DeviceDriver:
     """
-    This is a simple device driver class.  A more complicated driver
-    might be written in C or C++ and bound to python using pybind11
-    or similar.
+    This is a simple device driver class.  A more complicated driver might be
+    written in C or C++ and bound to python using pybind11 or similar.
     """
+    # Mark this class as an object that the tuber server should inspect for
+    # methods and attributes
+    __tuber_object__ = True
+
+    # Exclude certain attributes from being sent over the network to
+    # any clients.  Typically these are complex objects (e.g. serial devices)
+    # that would throw a "circular reference error" or similar.
+    __tuber_exclude__ = ["button", "knob"]
 
     def __init__(self):
         self.button = False
