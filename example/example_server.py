@@ -6,6 +6,7 @@ class DeviceDriver:
     This is a simple device driver class.  A more complicated driver might be
     written in C or C++ and bound to python using pybind11 or similar.
     """
+
     # Mark this class as an object that the tuber server should inspect for
     # methods and attributes
     __tuber_object__ = True
