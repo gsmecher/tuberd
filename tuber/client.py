@@ -28,6 +28,7 @@ async def resolve(
     accept_types: list[str] | None = None,
     convert_json: bool | None = None,
     return_exceptions: bool | None = None,
+    timeout: float | None = None,
 ):
     """Create a local reference to a networked resource.
 
@@ -52,6 +53,9 @@ async def resolve(
         entries in the response list.  If False, any errors in the output are raised
         as exceptions.  Otherwise, fall back to context default.  This default may be
         overridden in the context construction or in each individual context call.
+    timeout : float
+        HTTP request timeout in seconds.  If None, no timeout is applied.  This
+        default may be overridden in the context construction.
 
     Returns
     -------
@@ -66,6 +70,7 @@ async def resolve(
         accept_types=accept_types,
         convert_json=convert_json,
         return_exceptions=return_exceptions,
+        timeout=timeout,
     )
     await instance.tuber_resolve()
     return instance
@@ -77,6 +82,7 @@ def resolve_simple(
     accept_types: list[str] | None = None,
     convert_json: bool | None = None,
     return_exceptions: bool | None = None,
+    timeout: float | None = None,
 ):
     """Create a local reference to a networked resource.
 
@@ -101,6 +107,9 @@ def resolve_simple(
         entries in the response list.  If False, any errors in the output are raised
         as exceptions.  Otherwise, fall back to context default.  This default may be
         overridden in the context construction or in each individual context call.
+    timeout : float
+        HTTP request timeout in seconds.  If None, no timeout is applied.  This
+        default may be overridden in the context construction.
 
     Returns
     -------
@@ -115,6 +124,7 @@ def resolve_simple(
         accept_types=accept_types,
         convert_json=convert_json,
         return_exceptions=return_exceptions,
+        timeout=timeout,
     )
     instance.tuber_resolve()
     return instance
