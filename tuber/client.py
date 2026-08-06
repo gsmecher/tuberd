@@ -457,6 +457,11 @@ class SimpleContext:
                 for w in getkey(r, "warnings"):
                     warnings.warn(w)
 
+            # A future the caller has cancelled (e.g. via a timeout) can no
+            # longer accept a result - don't let it spoil the batch.
+            if f.cancelled():
+                continue
+
             # Resolve either a result or an error
             if haskey(r, "error") and getkey(r, "error"):
                 err = getkey(r, "error")
@@ -470,17 +475,22 @@ class SimpleContext:
                 else:
                     f.set_exception(TuberError("Result has no 'result' attribute"))
 
-        # Return a list of results
+        # Return a list of results. Futures the caller has cancelled have no
+        # result to collect - stand in with a CancelledError or None so the
+        # rest of the batch is unaffected.
         if return_exceptions:
             out = []
             for f in futures:
+                if f.cancelled():
+                    out.append(asyncio.CancelledError())
+                    continue
                 try:
                     out.append(f.result())
                 except Exception as e:
                     out.append(e)
             return out
 
-        return [f.result() for f in futures]
+        return [None if f.cancelled() else f.result() for f in futures]
 
     def _receive(
         self,
@@ -581,6 +591,39 @@ class SimpleContext:
         return self.receive(resp)
 
 
+class ContextFuture(asyncio.Future):
+    """A Future for a call queued in a Context.
+
+    Awaiting this future before the Context has been flushed sends every call
+    queued so far (in-order, as a single request) and returns this call's
+    result. This allows results to be retrieved without exiting the context:
+
+        >>> async with obj.tuber_context() as ctx:
+        ...     ctx.some_method()
+        ...     result = await ctx.another_method()  # doctest: +SKIP
+
+    Because the flush dispatches the whole batch, an error from any queued
+    call is raised at the await that triggered the flush.
+    """
+
+    def __init__(self, context: "Context"):
+        super().__init__(loop=asyncio.get_running_loop())
+        self._context = context
+
+    def __await__(self):
+        # If we're unresolved and calls (ours among them) are still queued,
+        # flush the context. If the queue is empty, either we're already
+        # resolved or a flush is in flight - fall through and wait for it.
+        # The flush is shielded because it acts on the whole batch:
+        # cancelling one awaiter (e.g. via a timeout) must not abort the
+        # request that other queued calls are counting on.
+        if not self.done() and self._context.calls:
+            yield from asyncio.shield(self._context()).__await__()
+        return (yield from super().__await__())
+
+    __iter__ = __await__  # make compatible with 'yield from'
+
+
 class Context(SimpleContext):
     """An asynchronous context container for TuberCalls. Permits calls to be
     aggregated.
@@ -604,8 +647,7 @@ class Context(SimpleContext):
         raise NotImplementedError
 
     def _add_call(self, **request):
-        loop = asyncio.get_running_loop()
-        future = loop.create_future()
+        future = ContextFuture(self)
         self.calls.append((request, future))
         return future
 

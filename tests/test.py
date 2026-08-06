@@ -111,6 +111,14 @@ class WarningsClass:
         return True
 
 
+class SlowObject:
+    def sleep(self, seconds):
+        import time
+
+        time.sleep(seconds)
+        return seconds
+
+
 registry = {
     "NullObject": NullObject(),
     "ObjectWithMethod": ObjectWithMethod(),
@@ -127,6 +135,7 @@ registry = {
     "Types": Types(),
     "NumPy": NumPy(),
     "Warnings": WarningsClass(),
+    "SlowObject": SlowObject(),
     "Wrapper": tm.Wrapper(),
 }
 
@@ -524,6 +533,72 @@ async def test_tuberpy_async_context_with_exception(resolve):
     # exception too)
     with pytest.raises(tuber.TuberRemoteError):
         await tuber_result(r3)
+
+
+@pytest.mark.asyncio
+async def test_tuberpy_async_context_await_flushes(accept_types, tuberd_host):
+    """Awaiting a queued call mid-context flushes the calls queued so far."""
+    s = await tuber.resolve(tuberd_host, "Wrapper", accept_types)
+
+    async with tuber_context(s) as ctx:
+        r1 = ctx.increment([1, 2, 3])
+        r2 = await ctx.increment([2, 3, 4])
+        assert r2 == [3, 4, 5]
+
+        # the await dispatched everything queued before it, too
+        assert r1.done()
+        assert r1.result() == [2, 3, 4]
+
+        # the context remains usable after a mid-context flush
+        r3 = await ctx.increment([3, 4, 5])
+        assert r3 == [4, 5, 6]
+
+    # nothing left over for the exit flush
+    assert not ctx.calls
+
+
+@pytest.mark.asyncio
+async def test_tuberpy_async_context_await_flush_exception(accept_types, tuberd_host):
+    """Errors anywhere in the flushed batch surface at the triggering await."""
+    s = await tuber.resolve(tuberd_host, "Wrapper", accept_types)
+
+    async with tuber_context(s) as ctx:
+        r1 = ctx.increment([1, 2, 3])  # fine
+        with pytest.raises(tuber.TuberRemoteError):
+            await ctx.increment(4)  # wrong type
+
+        # the passing call in the batch still resolved normally
+        assert (await r1) == [2, 3, 4]
+
+
+@pytest.mark.asyncio
+async def test_tuberpy_async_context_cancelled_call(accept_types, tuberd_host):
+    """A cancelled per-call future doesn't spoil the rest of the batch."""
+    s = await tuber.resolve(tuberd_host, "Wrapper", accept_types)
+
+    async with tuber_context(s) as ctx:
+        r1 = ctx.increment([1, 2, 3])
+        r2 = ctx.increment([2, 3, 4])
+        r2.cancel()
+
+    assert (await r1) == [2, 3, 4]
+    with pytest.raises(asyncio.CancelledError):
+        await r2
+
+
+@pytest.mark.asyncio
+async def test_tuberpy_async_context_await_timeout(accept_types, tuberd_host):
+    """A timed-out awaiter doesn't abort the flush other queued calls rely on."""
+    s = await tuber.resolve(tuberd_host, "SlowObject", accept_types)
+
+    async with tuber_context(s) as ctx:
+        r1 = ctx.sleep(0.1)
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(ctx.sleep(0.5), timeout=0.2)
+
+        # the shielded flush completes in the background and resolves the
+        # sibling call despite the cancellation
+        assert (await r1) == 0.1
 
 
 @pytest.mark.asyncio
