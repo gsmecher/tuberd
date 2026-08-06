@@ -1,3 +1,16 @@
+v0.18.5
+=======
+
+- Async Context: awaiting a queued call now flushes the context (everything
+  queued so far, in order, as a single request) and returns that call's
+  result. Previously this deadlocked, since nothing resolved the returned
+  future until the context was flushed explicitly or on exit. The flush is
+  shielded from cancellation so a timed-out awaiter (e.g. asyncio.wait_for)
+  cannot strand other queued calls.
+
+- Context result parsing now tolerates per-call futures that the caller has
+  cancelled, instead of failing the whole batch with InvalidStateError.
+
 v0.18.4
 =======
 
