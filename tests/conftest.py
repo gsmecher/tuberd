@@ -1,8 +1,10 @@
 import os
 import pytest
 import requests
+import socket
 import subprocess
 import sys
+import time
 import warnings
 
 from tuber import codecs
@@ -74,6 +76,21 @@ def tuberd(request, pytestconfig):
         argv.extend(["--json", "orjson"])
 
     s = subprocess.Popen(argv)
+
+    # The server takes a moment to come up (it sources this test file as a
+    # registry) - don't release tests against it until it's listening.
+    for _ in range(100):
+        if s.poll() is not None:
+            raise RuntimeError(f"tuberd exited on startup with code {s.returncode}")
+        try:
+            with socket.create_connection(("localhost", int(TUBERD_PORT)), timeout=0.1):
+                break
+        except OSError:
+            time.sleep(0.1)
+    else:
+        s.terminate()
+        raise RuntimeError("tuberd did not start listening")
+
     yield s
     s.terminate()
 
