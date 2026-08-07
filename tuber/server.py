@@ -433,23 +433,25 @@ class RequestHandler:
         self.validate(data, schema.request)
         return data
 
-    def handle(self, request, headers):
+    def handle(self, request, content_type="", accept="", x_tuber_options=""):
         """
         Handle the input request from the server.
 
         Arguments
         ---------
-        request : str
-            Encoded request string.
-        headers : dict
-            Dictionary of headers from the posted request.  Valid keys are:
-
-                Content-Type: a string containing a valid request format type,
-                    e.g. "application/json" or "application/cbor"
-                Accept: a string containing a valid response format type,
-                    e.g. "application/json", "application/cbor" or "*/*"
-                X-Tuber-Options: a configuration option for the handler,
-                    e.g. "continue-on-error"
+        request : bytes
+            Encoded request.
+        content_type : str
+            Request format type, e.g. "application/json" or
+            "application/cbor".  If empty, defaults to the handler's
+            default format.
+        accept : str
+            Acceptable response format types, e.g. "application/json",
+            "application/cbor" or "*/*".  If empty, defaults to the
+            request format.
+        x_tuber_options : str
+            Comma-separated configuration options for the handler, e.g.
+            "continue-on-error".
 
         Returns
         -------
@@ -463,15 +465,16 @@ class RequestHandler:
 
         try:
             # parse request format
-            content_type = headers.get("Content-Type", request_format)
+            if not content_type:
+                content_type = request_format
             if content_type not in self.codecs:
                 raise ValueError(f"Not able to decode media type {content_type}")
             # Default to using the same response format as the request
             request_format = response_format = content_type
 
             # parse response format
-            if "Accept" in headers:
-                accept_types = [v.strip() for v in headers["Accept"].split(",")]
+            if accept:
+                accept_types = [v.strip() for v in accept.split(",")]
                 if "*/*" in accept_types or "application/*" in accept_types:
                     response_format = request_format
                 else:
@@ -480,7 +483,7 @@ class RequestHandler:
                             response_format = t
                             break
                     else:
-                        msg = f"Not able to encode any media type matching {headers['Accept']}"
+                        msg = f"Not able to encode any media type matching {accept}"
                         raise ValueError(msg)
 
             # decode request
@@ -496,7 +499,7 @@ class RequestHandler:
 
             # optionally allow requests to continue to the next item if an error
             # is raised for any request in the list
-            xopts = [v.strip() for v in headers.get("X-Tuber-Options", "").split(",")]
+            xopts = [v.strip() for v in x_tuber_options.split(",")]
             continue_on_error = "continue-on-error" in xopts
 
             # parse sequence of requests
