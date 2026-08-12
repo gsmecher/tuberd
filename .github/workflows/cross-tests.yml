@@ -1,0 +1,94 @@
+name: Cross version tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+env:
+  CC: gcc-10
+  CXX: g++-10
+  LD_LIBRARY_PATH: /usr/local/lib # this is where libhttpserver installs itself
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        client_version: ["v0.15", "v0.16", "current"]
+        server_version: ["v0.15", "v0.16", "current"]
+
+    steps:
+
+      - name: Check out libhttpserver dependency
+        uses: actions/checkout@v4
+        with:
+          repository: etr/libhttpserver
+          ref: 0.19.0
+          path: libhttpserver
+
+      - name: Install C++ dependencies
+        # libfmt-dev is a deprecated requirement kept for v0.15 and earlier
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libmicrohttpd-dev pybind11-dev libfmt-dev
+
+      - name: Build and install libhttpserver
+        run: |
+          cd libhttpserver
+          ./bootstrap
+          mkdir build
+          cd build
+          ../configure
+          make
+          sudo make install
+
+      - name: Client checkout
+        uses: actions/checkout@v4
+        with:
+          path: client
+          ref: >
+            ${{
+              matrix.client_version == 'current' &&
+              (github.event_name == 'pull_request' && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.ref_name) ||
+              matrix.client_version
+            }}
+
+      - name: Install client Python dependencies
+        uses: py-actions/py-dependency-install@v4
+        with:
+          path: "client/requirements.txt"
+
+      - name: Build client
+        working-directory: client
+        run: |
+          cmake -B build -DCMAKE_MODULE_PATH=/usr/local/share/cmake/Modules
+          cmake --build build
+
+      - name: Server checkout
+        uses: actions/checkout@v4
+        with:
+          path: server
+          ref: >
+            ${{
+              matrix.server_version == 'current' &&
+              (github.event_name == 'pull_request' && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.ref_name) ||
+              matrix.server_version
+            }}
+
+      - name: Install server Python dependencies
+        uses: py-actions/py-dependency-install@v4
+        with:
+          path: "server/requirements.txt"
+
+      - name: Build server
+        working-directory: server
+        run: |
+          cmake -B build -DCMAKE_MODULE_PATH=/usr/local/share/cmake/Modules
+          cmake --build build
+
+      - name: Test
+        working-directory: client/build
+        run: ctest --verbose
