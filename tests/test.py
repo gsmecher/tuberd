@@ -2,11 +2,13 @@
 
 import aiohttp
 import asyncio
+import concurrent.futures
 import importlib
 import inspect
 import numpy as np
 import os
 import pytest
+import requests
 import warnings
 import tuber
 
@@ -536,13 +538,13 @@ async def test_tuberpy_async_context_with_exception(resolve):
 
 
 @pytest.mark.asyncio
-async def test_tuberpy_async_context_await_flushes(accept_types, tuberd_host):
+async def test_tuberpy_context_await_flushes(resolve):
     """Awaiting a queued call mid-context flushes the calls queued so far."""
-    s = await tuber.resolve(tuberd_host, "Wrapper", accept_types)
+    s = await resolve("Wrapper")
 
     async with tuber_context(s) as ctx:
         r1 = ctx.increment([1, 2, 3])
-        r2 = await ctx.increment([2, 3, 4])
+        r2 = await tuber_result(ctx.increment([2, 3, 4]))
         assert r2 == [3, 4, 5]
 
         # the await dispatched everything queued before it, too
@@ -550,7 +552,7 @@ async def test_tuberpy_async_context_await_flushes(accept_types, tuberd_host):
         assert r1.result() == [2, 3, 4]
 
         # the context remains usable after a mid-context flush
-        r3 = await ctx.increment([3, 4, 5])
+        r3 = await tuber_result(ctx.increment([3, 4, 5]))
         assert r3 == [4, 5, 6]
 
     # nothing left over for the exit flush
@@ -558,32 +560,32 @@ async def test_tuberpy_async_context_await_flushes(accept_types, tuberd_host):
 
 
 @pytest.mark.asyncio
-async def test_tuberpy_async_context_await_flush_exception(accept_types, tuberd_host):
+async def test_tuberpy_context_await_flush_exception(resolve):
     """Errors anywhere in the flushed batch surface at the triggering await."""
-    s = await tuber.resolve(tuberd_host, "Wrapper", accept_types)
+    s = await resolve("Wrapper")
 
     async with tuber_context(s) as ctx:
         r1 = ctx.increment([1, 2, 3])  # fine
         with pytest.raises(tuber.TuberRemoteError):
-            await ctx.increment(4)  # wrong type
+            await tuber_result(ctx.increment(4))  # wrong type
 
         # the passing call in the batch still resolved normally
-        assert (await r1) == [2, 3, 4]
+        assert (await tuber_result(r1)) == [2, 3, 4]
 
 
 @pytest.mark.asyncio
-async def test_tuberpy_async_context_cancelled_call(accept_types, tuberd_host):
+async def test_tuberpy_context_cancelled_call(resolve):
     """A cancelled per-call future doesn't spoil the rest of the batch."""
-    s = await tuber.resolve(tuberd_host, "Wrapper", accept_types)
+    s = await resolve("Wrapper")
 
     async with tuber_context(s) as ctx:
         r1 = ctx.increment([1, 2, 3])
         r2 = ctx.increment([2, 3, 4])
         r2.cancel()
 
-    assert (await r1) == [2, 3, 4]
-    with pytest.raises(asyncio.CancelledError):
-        await r2
+    assert (await tuber_result(r1)) == [2, 3, 4]
+    with pytest.raises((asyncio.CancelledError, concurrent.futures.CancelledError)):
+        await tuber_result(r2)
 
 
 @pytest.mark.asyncio
@@ -599,6 +601,53 @@ async def test_tuberpy_async_context_await_timeout(accept_types, tuberd_host):
         # the shielded flush completes in the background and resolves the
         # sibling call despite the cancellation
         assert (await r1) == 0.1
+
+
+def test_tuberpy_simple_context_timeout(accept_types, tuberd_host):
+    """A timed-out awaiter doesn't abort the flush other queued calls rely on."""
+    s = tuber.resolve_simple(tuberd_host, "SlowObject", accept_types)
+
+    with s.tuber_context() as ctx:
+        r1 = ctx.sleep(0.1)
+        with pytest.raises(concurrent.futures.TimeoutError):
+            r2 = ctx.sleep(0.5)
+            r2.result(timeout=0.2)
+
+        # the flush completes in the background and resolves the
+        # sibling call despite the cancellation
+        assert r1.result() == 0.1
+
+
+def test_tuberpy_simple_context_exception_flushes(accept_types, tuberd_host):
+    """Retrieving a queued call's exception mid-context flushes the calls queued
+    so far, in the same way as retrieving its result."""
+    s = tuber.resolve_simple(tuberd_host, "Wrapper", accept_types, return_exceptions=True)
+
+    with s.tuber_context() as ctx:
+        r1 = ctx.increment([1, 2, 3])
+        r2 = ctx.increment(4)  # wrong type
+
+        # this must dispatch the batch rather than block on a future that
+        # nothing has been sent to resolve
+        assert isinstance(r2.exception(timeout=10), tuber.TuberRemoteError)
+
+        assert r1.result() == [2, 3, 4]
+
+
+def test_tuberpy_simple_context_flush_connection_error(accept_types):
+    """A request that fails in transit is raised, not silently awaited.
+
+    Such a request never reaches the response hook, so it resolves none of the
+    per-call futures - the error must come from the request itself.
+    """
+    # port 9 (discard) refuses connections
+    obj = tuber.client.SimpleTuberObject("Wrapper", hostname="127.0.0.1:9", accept_types=accept_types)
+    obj._tuber_resolved = True
+
+    with obj.tuber_context() as ctx:
+        r1 = ctx._add_call(object="Wrapper", method="increment", args=[[1, 2, 3]], kwargs={})
+        with pytest.raises(requests.exceptions.ConnectionError):
+            r1.result(timeout=10)
 
 
 @pytest.mark.asyncio

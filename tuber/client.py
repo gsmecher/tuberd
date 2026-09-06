@@ -244,6 +244,36 @@ class SubContext:
         return caller
 
 
+class SimpleContextFuture(concurrent.futures.Future):
+
+    def __init__(self, context: "SimpleContext"):
+        super().__init__()
+        self._context = context
+
+    def _flush(self, timeout=None):
+        # Wait for all preceding futures to return or cancel.
+        # See ContextFuture for the implementation logic.
+        if self.done() or not self._context.calls:
+            return
+
+        response = self._context.send()
+
+        # A request that fails in transit (e.g. timeout) never reaches the
+        # response hook, so it resolves none of the per-call futures. Collect
+        # the request future here so such an error is raised to the caller
+        # rather than blocking on an unresolvable future.
+        if response is not None:
+            response.result(timeout=timeout)
+
+    def result(self, timeout=None):
+        self._flush(timeout=timeout)
+        return super().result(timeout=timeout)
+
+    def exception(self, timeout=None):
+        self._flush(timeout=timeout)
+        return super().exception(timeout=timeout)
+
+
 class SimpleContext:
     """A serial context container for TuberCalls. Permits calls to be aggregated.
 
@@ -334,7 +364,7 @@ class SimpleContext:
         return ctx
 
     def _add_call(self, **request):
-        future = concurrent.futures.Future()
+        future = SimpleContextFuture(self)
         self.calls.append((request, future))
         return future
 
@@ -354,7 +384,7 @@ class SimpleContext:
 
         Returns
         -------
-        response : concurrent.futures.Future
+        response : SimpleContextFuture
             Future object corresponding to the server request.  Use ``receive()`` to
             retrieve the result from the server.
         """
@@ -495,7 +525,7 @@ class SimpleContext:
     def _receive(
         self,
         response: "requests.Response",
-        futures: list["concurrent.futures.Future"],
+        futures: list["SimpleContextFuture"],
         convert_json: bool | None = None,
         return_exceptions: bool | None = None,
     ):
@@ -550,7 +580,7 @@ class SimpleContext:
         response.tuber_results = self._parse_json(json_out, futures, convert_json, return_exceptions)
         return response.tuber_results
 
-    def receive(self, response: "concurrent.futures.Future"):
+    def receive(self, response: "SimpleContextFuture"):
         """Wait for a response from a previously sent HTTP request.
 
         Arguments
