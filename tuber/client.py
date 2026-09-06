@@ -481,12 +481,10 @@ class SimpleContext:
         if return_exceptions:
             out = []
             for f in futures:
-                if f.cancelled():
-                    out.append(asyncio.CancelledError())
-                    continue
                 try:
+                    # This will raise a CancelledError if the future was cancelled
                     out.append(f.result())
-                except Exception as e:
+                except (Exception, asyncio.CancelledError) as e:
                     out.append(e)
             return out
 
@@ -535,6 +533,9 @@ class SimpleContext:
         with response as resp:
             raw_out = resp.content
             if not resp.ok:
+                # cancel any pending futures
+                for f in futures:
+                    f.cancel()
                 try:
                     text = resp.text
                 except Exception:
@@ -544,6 +545,9 @@ class SimpleContext:
             # Check that the resulting media type is one which can actually be handled;
             # this is slightly more liberal than checking that it is really among those we declared
             if content_type not in AcceptTypes:
+                # cancel any pending futures
+                for f in futures:
+                    f.cancel()
                 raise TuberError(f"Unexpected response content type: {content_type}")
             json_out = AcceptTypes[content_type](raw_out, resp.apparent_encoding, convert=convert_json)
 
@@ -739,6 +743,9 @@ class Context(SimpleContext):
         async with cs.post(self.uri, **post_kwargs) as resp:
             raw_out = await resp.read()
             if not resp.ok:
+                # cancel any pending futures
+                for f in futures:
+                    f.cancel()
                 try:
                     text = raw_out.decode(resp.charset or "utf-8")
                 except Exception as ex:
@@ -748,6 +755,9 @@ class Context(SimpleContext):
             # Check that the resulting media type is one which can actually be handled;
             # this is slightly more liberal than checking that it is really among those we declared
             if content_type not in AcceptTypes:
+                # cancel any pending futures
+                for f in futures:
+                    f.cancel()
                 raise TuberError("Unexpected response content type: " + content_type)
             json_out = AcceptTypes[content_type](raw_out, resp.charset, convert=convert_json)
 
