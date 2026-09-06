@@ -807,6 +807,7 @@ class SimpleTuberObject:
         """
         self._tuber_objname = objname
         self._tuber_resolved = False
+        self._tuber_meta = None
         if parent is None:
             assert hostname, "Argument 'hostname' required"
             self._tuber_host = hostname
@@ -927,14 +928,25 @@ class SimpleTuberObject:
         if doc := meta.get("__doc__", None):
             self.__doc__ = meta["__doc__"]
 
+        # keep track of existing remote attributes
+        if self._tuber_meta is None:
+            self._tuber_meta = {"objects": [], "methods": [], "properties": [], "container": False}
+
         # object attributes
-        objects = meta.get("objects", {})
+        objects = meta.setdefault("objects", {})
+        # remove any objects that are no longer on the remote
+        for k in set(self._tuber_meta["objects"]) - set(objects):
+            delattr(self, k)
         for k, v in objects.items():
             obj = self._resolve_object(attr=k, meta=v)
             setattr(self, k, obj)
 
         # methods
-        if methods := meta.setdefault("methods", {}):
+        methods = meta.setdefault("methods", {})
+        # remove any methods that are no longer on the remote
+        for k in set(self._tuber_meta["methods"]) - set(methods):
+            delattr(self, k)
+        if methods:
             # backwards compatibility for v0.15 and older: when assembling
             # metadata, older tuberd did not understand the "resolve=True"
             # argument and returned a list of methods as metadata, rather than
@@ -959,7 +971,11 @@ class SimpleTuberObject:
                 setattr(self, k, types.MethodType(v, self))
 
         # static properties
-        if properties := meta.setdefault("properties", {}):
+        properties = meta.setdefault("properties", {})
+        # remove any properties that are no longer on the remote
+        for k in set(self._tuber_meta["properties"]) - set(properties):
+            delattr(self, k)
+        if properties:
             # same workaround as above
             if isinstance(properties, list):
                 with SimpleContext(self, convert_json=False, return_exceptions=False) as ctx:
@@ -979,8 +995,15 @@ class SimpleTuberObject:
             for k, v in properties.items():
                 setattr(self, k, recurse(v) if self._convert_json else v)
 
-        # container of objects
-        if values := meta.setdefault("values", None):
+        # Discard any container attributes from a previous resolve before
+        # rebuilding: changes may have been structural (e.g. dict-like to
+        # list-like)
+        if self._tuber_meta["container"]:
+            for k in ("_items", "keys", "values", "items", "tuber_get"):
+                if k in self.__dict__:
+                    delattr(self, k)
+
+        if (values := meta.setdefault("values", None)) is not None:
             keys = meta.get("keys", None)
             if keys is None or isinstance(keys, int):
                 islist = True
@@ -1023,6 +1046,13 @@ class SimpleTuberObject:
 
             setattr(self, "tuber_get", types.MethodType(tuber_get, self))
 
+        # store names of resolved attributes
+        self._tuber_meta = {
+            "objects": list(meta["objects"]),
+            "methods": list(meta["methods"]),
+            "properties": list(meta["properties"]),
+            "container": meta["values"] is not None,
+        }
         self._tuber_resolved = True
         return meta
 
