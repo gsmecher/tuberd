@@ -2,6 +2,7 @@
 
 import aiohttp
 import asyncio
+import concurrent.futures
 import importlib
 import inspect
 import numpy as np
@@ -584,6 +585,36 @@ async def test_tuberpy_async_context_cancelled_call(accept_types, tuberd_host):
     assert (await r1) == [2, 3, 4]
     with pytest.raises(asyncio.CancelledError):
         await r2
+
+
+@pytest.mark.parametrize("return_exceptions", [True, False])
+@pytest.mark.asyncio
+async def test_tuberpy_context_cancelled_call_return_exceptions(return_exceptions, resolve):
+    """A cancelled call is reported per-call, not raised for the whole batch."""
+
+    s = await resolve("Wrapper", return_exceptions=return_exceptions)
+
+    async with tuber_context(s, return_exceptions=return_exceptions) as ctx:
+        r1 = ctx.increment([1, 2, 3])
+        r2 = ctx.increment([2, 3, 4])
+        r3 = ctx.increment([3, 4, 5])
+        r2.cancel()
+
+        # the flush must not propagate the cancellation of a single call
+        results = await ctx()
+
+    # the cancelled call neither produces a result nor spoils its siblings
+    assert results[0] == [2, 3, 4]
+    assert results[2] == [4, 5, 6]
+    if return_exceptions:
+        assert isinstance(results[1], (asyncio.CancelledError, concurrent.futures.CancelledError))
+    else:
+        assert results[1] is None
+
+    assert (await tuber_result(r1)) == [2, 3, 4]
+    assert (await tuber_result(r3)) == [4, 5, 6]
+    with pytest.raises((asyncio.CancelledError, concurrent.futures.CancelledError)):
+        await tuber_result(r2)
 
 
 @pytest.mark.asyncio
