@@ -176,11 +176,14 @@ Codec = namedtuple("Codec", ["decode", "encode"])
 
 
 def decode_json(response_data, **kwargs):
+    if have_simplejson:
+        kwargs.setdefault("allow_nan", True)
     return json.loads(response_data, **kwargs)
 
 
 def encode_json(obj, **kwargs):
     if have_simplejson:
+        kwargs.setdefault("allow_nan", True)
         kwargs.setdefault("encoding", None)
     return json.dumps(obj, default=wrap_bytes_for_json, **kwargs)
 
