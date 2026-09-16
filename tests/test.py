@@ -5,6 +5,7 @@ import asyncio
 import concurrent.futures
 import importlib
 import inspect
+import math
 import numpy as np
 import os
 import pytest
@@ -85,6 +86,15 @@ class Types:
 
     def bytes_function(self, arg=None):
         return self.BYTES
+
+    def nan_function(self):
+        return float("nan")
+
+    def inf_function(self):
+        return float("inf")
+
+    def neginf_function(self):
+        return float("-inf")
 
 
 class NumPy:
@@ -295,6 +305,28 @@ def test_unserializable(tuber_call):
         or message.startswith("TypeError: default serializer")
         or message.startswith("CBOREncodeTypeError: cannot serialize")
     )
+
+
+#
+# NaN/Inf encoding tests - verify all codecs handle IEEE 754 special float values.
+#
+
+
+@pytest.mark.no_orjson
+def test_nan_value(tuber_call):
+    result = tuber_call(object="Types", method="nan_function")
+    assert "result" in result
+    assert math.isnan(result["result"])
+
+
+@pytest.mark.no_orjson
+def test_inf_value(tuber_call):
+    assert tuber_call(object="Types", method="inf_function") == Succeeded(float("inf"))
+
+
+@pytest.mark.no_orjson
+def test_neginf_value(tuber_call):
+    assert tuber_call(object="Types", method="neginf_function") == Succeeded(float("-inf"))
 
 
 #

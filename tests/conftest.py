@@ -12,9 +12,10 @@ from tuber import codecs
 pytest_plugins = ("pytest_asyncio",)
 
 
-# Add custom orjson marker
+# Add custom orjson markers
 def pytest_configure(config):
     config.addinivalue_line("markers", "orjson: marks tests that require server-side serialization of numpy arrays")
+    config.addinivalue_line("markers", "no_orjson: marks tests that are incompatible with the orjson codec")
 
 
 # Allow test invocation to specify arguments to tuberd backend (this way, we
@@ -27,19 +28,25 @@ def pytest_addoption(parser):
     # changes test behaviour.
     parser.addoption("--orjson", action="store_true", default=False)
 
+    # The "--simplejson" option is handled as a special case because it
+    # changes test behaviour.
+    parser.addoption("--simplejson", action="store_true", default=False)
+
     # Allow tuberd port to be specified
     parser.addoption("--tuberd-port", default=8080)
 
 
 # Some tests require orjson - the following skips them unless we're in
-# --orjson mode.
+# --orjson mode.  Conversely, some tests are incompatible with orjson and are
+# skipped when --orjson is active.
 def pytest_collection_modifyitems(config, items):
-    if config.getoption("orjson"):
-        return
+    orjson = config.getoption("orjson")
 
     for item in items:
-        if "orjson" in item.keywords:
+        if not orjson and "orjson" in item.keywords:
             item.add_marker(pytest.mark.skip(reason="Test depends on orjson fastpath"))
+        if orjson and "no_orjson" in item.keywords:
+            item.add_marker(pytest.mark.skip(reason="Test incompatible with orjson"))
 
 
 @pytest.fixture(scope="module")
@@ -74,6 +81,17 @@ def tuberd(request, pytestconfig):
         # the test.
         pytest.importorskip("orjson")
         argv.extend(["--json", "orjson"])
+
+    if pytestconfig.getoption("simplejson"):
+        # If we can't import simplejson here, it's presumably missing from the
+        # tuberd execution environment as well - in which case, we should skip
+        # the test.
+        pytest.importorskip("simplejson")
+        os.environ.pop("TUBER_DISABLE_SIMPLEJSON", None)
+    else:
+        # Force stdlib json so this test run is not silently using simplejson.
+        # The subprocess inherits the environment, so this also applies to tuberd.
+        os.environ["TUBER_DISABLE_SIMPLEJSON"] = "1"
 
     s = subprocess.Popen(argv)
 

@@ -59,11 +59,18 @@ if(BUILD_TESTING)
 		WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 		COMMAND tests/test.py --orjson)
 
+	add_test(NAME test-simplejson
+		WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+		COMMAND tests/test.py --simplejson)
+
 	add_test(NAME test-doctests
 		WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 		COMMAND python3 -m pytest tuber --doctest-modules)
 
-	set_tests_properties(test-native-json test-orjson-fastpath
+	set_tests_properties(test-native-json
+		PROPERTIES ENVIRONMENT "CMAKE_TEST=1;TUBER_DISABLE_SIMPLEJSON=1;PATH=${CMAKE_BINARY_DIR}:$ENV{PATH};PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}")
+
+	set_tests_properties(test-orjson-fastpath test-simplejson
 		PROPERTIES ENVIRONMENT "CMAKE_TEST=1;PATH=${CMAKE_BINARY_DIR}:$ENV{PATH};PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}")
 endif(BUILD_TESTING)
 

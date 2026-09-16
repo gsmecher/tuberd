@@ -29,7 +29,7 @@ async = ["aiohttp", "requests", "requests-futures"]
 cbor = ["cbor2"]
 numpy = ["numpy"]
 orjson = ["orjson"]
-dev = ["aiohttp", "cbor2", "jsonschema", "numpy", "orjson", "pytest", "pytest-asyncio", "requests", "requests-futures"]
+dev = ["aiohttp", "cbor2", "jsonschema", "numpy", "orjson", "pytest", "pytest-asyncio", "requests", "requests-futures", "simplejson"]
 
 [tool.setuptools_scm]
 write_to = "tuber/_version.py"
@@ -43,8 +43,9 @@ line-length = 120
 test-extras = ["dev"]
 before-all = "./wheels/install_deps.sh"
 test-command = [
-    "pytest -sv {project}/tests/test.py --import-mode append",
+    "TUBER_DISABLE_SIMPLEJSON=1 pytest -sv {project}/tests/test.py --import-mode append",
     "pytest -sv {project}/tests/test.py --import-mode append --orjson",
+    "pytest -sv {project}/tests/test.py --import-mode append --simplejson",
 ]
 
 [[tool.cibuildwheel.overrides]]

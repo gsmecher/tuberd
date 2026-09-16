@@ -1,5 +1,6 @@
 from collections.abc import Sequence, Mapping
 from collections import namedtuple
+import os
 import sys
 import types
 
@@ -12,6 +13,8 @@ except ImportError:
 
 # Prefer SimpleJSON, but fall back on built-in
 try:
+    if os.environ.get("TUBER_DISABLE_SIMPLEJSON"):
+        raise ImportError
     import simplejson as json
 
     have_simplejson = True
