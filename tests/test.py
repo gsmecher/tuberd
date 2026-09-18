@@ -648,6 +648,64 @@ def test_tuberpy_simple_context_timeout(accept_types, tuberd_host):
         assert r1.result() == 0.1
 
 
+# RFC 5737 TEST-NET-1: routable but unreachable, reliably triggers connect timeouts.
+UNREACHABLE_HOST = "192.0.2.1:80"
+
+
+@pytest.mark.asyncio
+async def test_tuberpy_async_http_response_timeout_tuple(accept_types, tuberd_host):
+    """HTTP response timeout via 2-tuple (connect, total) fires on slow responses."""
+    s = await tuber.resolve(tuberd_host, "SlowObject", accept_types, timeout=(10, 0.1))
+    with pytest.raises(TimeoutError):
+        await s.sleep(0.5)
+
+
+@pytest.mark.asyncio
+async def test_tuberpy_async_http_response_timeout_tuple_none_connect(accept_types, tuberd_host):
+    """HTTP response timeout via 2-tuple (None, total) fires when only total is set."""
+    s = await tuber.resolve(tuberd_host, "SlowObject", accept_types, timeout=(None, 0.1))
+    with pytest.raises(TimeoutError):
+        await s.sleep(0.5)
+
+
+@pytest.mark.asyncio
+async def test_tuberpy_async_http_connect_timeout_tuple(accept_types):
+    """HTTP connection timeout via 2-tuple (connect, total) fires for unreachable hosts."""
+    obj = tuber.TuberObject("Wrapper", hostname=UNREACHABLE_HOST, accept_types=accept_types, timeout=(0.2, 10))
+    obj._tuber_resolved = True
+    ctx = obj.tuber_context()
+    async with ctx:
+        ctx._add_call(object="Wrapper", method="increment", args=[[1, 2, 3]], kwargs={})
+        with pytest.raises(aiohttp.ConnectionTimeoutError):
+            await ctx()
+
+
+def test_tuberpy_simple_http_response_timeout_tuple(accept_types, tuberd_host):
+    """HTTP response timeout via 2-tuple (connect, read) fires on slow responses."""
+    s = tuber.resolve_simple(tuberd_host, "SlowObject", accept_types, timeout=(10, 0.1))
+    with pytest.raises(requests.exceptions.ReadTimeout):
+        s.sleep(0.5)
+
+
+def test_tuberpy_simple_http_response_timeout_tuple_none_connect(accept_types, tuberd_host):
+    """HTTP response timeout via 2-tuple (None, read) fires when only read timeout is set."""
+    s = tuber.resolve_simple(tuberd_host, "SlowObject", accept_types, timeout=(None, 0.1))
+    with pytest.raises(requests.exceptions.ReadTimeout):
+        s.sleep(0.5)
+
+
+def test_tuberpy_simple_http_connect_timeout_tuple(accept_types):
+    """HTTP connection timeout via 2-tuple (connect, read) fires for unreachable hosts."""
+    obj = tuber.client.SimpleTuberObject(
+        "Wrapper", hostname=UNREACHABLE_HOST, accept_types=accept_types, timeout=(0.2, 10)
+    )
+    obj._tuber_resolved = True
+    with obj.tuber_context() as ctx:
+        r1 = ctx._add_call(object="Wrapper", method="increment", args=[[1, 2, 3]], kwargs={})
+        with pytest.raises(requests.exceptions.ConnectTimeout):
+            r1.result(timeout=10)
+
+
 def test_tuberpy_simple_context_exception_flushes(accept_types, tuberd_host):
     """Retrieving a queued call's exception mid-context flushes the calls queued
     so far, in the same way as retrieving its result."""
