@@ -172,7 +172,7 @@ AcceptTypes = {}
 # decoding and encoding functions.  The interface for each should match that of json.loads() and
 # json.dumps(), respectively.
 Codecs = {}
-Codec = namedtuple("Codec", ["decode", "encode"])
+Codec = namedtuple("Codec", ["decode", "encode", "assemble_list"])
 
 
 def decode_json(response_data, **kwargs):
@@ -185,7 +185,12 @@ def encode_json(obj, **kwargs):
     return json.dumps(obj, default=wrap_bytes_for_json, **kwargs)
 
 
-Codecs["json"] = Codec(decode=decode_json, encode=encode_json)
+def assemble_json_list(encoded_items):
+    """Assemble a JSON array from individually encoded item strings."""
+    return "[" + ",".join(encoded_items) + "]"
+
+
+Codecs["json"] = Codec(decode=decode_json, encode=encode_json, assemble_list=assemble_json_list)
 
 if have_orjson:
     # If using orjson with NumPy, overload dumps with the right magic
@@ -198,7 +203,11 @@ if have_orjson:
             kwargs["option"] = kwargs.get("option", 0) | orjson.OPT_SERIALIZE_NUMPY
         return orjson.dumps(obj, default=wrap_bytes_for_json, **kwargs)
 
-    Codecs["orjson"] = Codec(decode=decode_orjson, encode=encode_orjson)
+    def assemble_orjson_list(encoded_items):
+        """Assemble a JSON array from individually encoded item byte strings."""
+        return b"[" + b",".join(encoded_items) + b"]"
+
+    Codecs["orjson"] = Codec(decode=decode_orjson, encode=encode_orjson, assemble_list=assemble_orjson_list)
 
 
 def decode_json_client(response_data, encoding, convert=True):
@@ -236,7 +245,23 @@ if have_cbor:
     def encode_cbor(obj, **kwargs):
         return cbor2.dumps(obj, default=cbor_augment_encode, **kwargs)
 
-    Codecs["cbor"] = Codec(decode=decode_cbor, encode=encode_cbor)
+    def assemble_cbor_list(encoded_items):
+        """Assemble a CBOR array from individually encoded item byte strings.
+
+        Uses CBOREncoder to write the definite-length array header, then appends each
+        pre-encoded item's bytes directly. This is valid CBOR: a definite-length array
+        header followed by N complete CBOR data items.
+        """
+        import io
+
+        buf = io.BytesIO()
+        enc = cbor2.CBOREncoder(buf)
+        enc.encode_length(4, len(encoded_items))  # CBOR major type 4 = array
+        for item_bytes in encoded_items:
+            buf.write(item_bytes)
+        return buf.getvalue()
+
+    Codecs["cbor"] = Codec(decode=decode_cbor, encode=encode_cbor, assemble_list=assemble_cbor_list)
 
     def decode_cbor_client(response_data, encoding, convert=True):
         if not convert:

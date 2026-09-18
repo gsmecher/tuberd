@@ -419,9 +419,20 @@ class RequestHandler:
             fmt = self.default_format
         try:
             self.validate(data, schema.response)
+            return fmt, self.codecs[fmt].encode(data)
         except Exception as e:
             data = error_response(e)
         return fmt, self.codecs[fmt].encode(data)
+
+    def encode_list(self, data, fmt=None):
+        """
+        Encode a list of data packets using the requested format.
+
+        Returns the response format and the encoded data.
+        """
+        if fmt is None:
+            fmt = self.default_format
+        return fmt, self.codecs[fmt].assemble_list([self.encode(d, fmt)[1] for d in data])
 
     def decode(self, data, fmt=None):
         """
@@ -463,7 +474,6 @@ class RequestHandler:
             The encoded response string
         """
         request_format = response_format = self.default_format
-        encode = lambda d: self.encode(d, response_format)
 
         try:
             # parse request format
@@ -494,7 +504,7 @@ class RequestHandler:
             # parse single request
             if isinstance(request_obj, dict):
                 result = self.invoke(request_obj)
-                return encode(result)
+                return self.encode(result, response_format)
 
             if not isinstance(request_obj, list):
                 raise TypeError("Unexpected type in request")
@@ -517,10 +527,10 @@ class RequestHandler:
                 if "error" in results[i] and not continue_on_error:
                     early_bail = True
 
-            return encode(results)
+            return self.encode_list(results, response_format)
 
         except Exception as e:
-            return encode(error_response(e))
+            return self.encode(error_response(e), response_format)
 
     def invoke(self, request):
         """

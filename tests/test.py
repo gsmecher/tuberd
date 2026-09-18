@@ -297,6 +297,21 @@ def test_unserializable(tuber_call):
     )
 
 
+def test_batch_unserializable_isolated(tuber_call):
+    """An unserializable result in a batch becomes a per-item error; other results are unaffected."""
+    results = tuber_call(
+        json=[
+            {"object": "ObjectWithMethod", "method": "method"},
+            {"object": "Wrapper", "method": "unserializable"},
+            {"object": "ObjectWithMethod", "method": "method"},
+        ]
+    )
+    assert len(results) == 3
+    assert results[0] == Succeeded("expected return value")
+    assert "error" in results[1]
+    assert results[2] == Succeeded("expected return value")
+
+
 #
 # pybind11 strenum tests. These tests are direct library imports and do not
 # exercise tuberd.
@@ -762,24 +777,23 @@ async def test_tuberpy_serialize_enum_class(resolve):
     assert r is True
 
 
-@pytest.mark.xfail
 @pytest.mark.asyncio
 async def test_tuberpy_async_context_with_unserializable(resolve):
-    """Ensure exceptions in a sequence of calls show up as expected."""
+    """An unserializable result in a batch is a per-item error; other results are unaffected."""
     s = await resolve("Wrapper")
 
-    async with tuber_context(s) as ctx:
-        r1 = ctx.increment([1, 2, 3])  # fine
-        r2 = ctx.unserializable()
-        r3 = ctx.increment([5, 6, 6])  # shouldn't execute
+    with pytest.raises(tuber.TuberRemoteError):
+        async with tuber_context(s) as ctx:
+            r1 = ctx.increment([1, 2, 3])  # fine
+            r2 = ctx.unserializable()  # encoding error
+            r3 = ctx.increment([5, 6, 6])  # still executes
 
-    await tuber_result(r1)
+    assert await tuber_result(r1) == [2, 3, 4]
 
     with pytest.raises(tuber.TuberRemoteError):
         await tuber_result(r2)
 
-    with pytest.raises(tuber.TuberRemoteError):
-        await tuber_result(r3)
+    assert await tuber_result(r3) == [6, 7, 7]
 
 
 @pytest.mark.asyncio
