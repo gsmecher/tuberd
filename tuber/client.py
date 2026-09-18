@@ -53,9 +53,11 @@ async def resolve(
         entries in the response list.  If False, any errors in the output are raised
         as exceptions.  Otherwise, fall back to context default.  This default may be
         overridden in the context construction or in each individual context call.
-    timeout : float
+    timeout : float or 2-tuple
         HTTP request timeout in seconds.  If None, no timeout is applied.  This
         default may be overridden in the context construction.
+        If a 2-tuple, the first value pertains to the initial connection time,
+        and the second value pertains to the total transmission and response.
 
     Returns
     -------
@@ -107,9 +109,11 @@ def resolve_simple(
         entries in the response list.  If False, any errors in the output are raised
         as exceptions.  Otherwise, fall back to context default.  This default may be
         overridden in the context construction or in each individual context call.
-    timeout : float
+    timeout : float or 2-tuple
         HTTP request timeout in seconds.  If None, no timeout is applied.  This
         default may be overridden in the context construction.
+        If a 2-tuple, the first value pertains to the initial connection time,
+        and the second value pertains to the total transmission and response.
 
     Returns
     -------
@@ -307,8 +311,10 @@ class SimpleContext:
             If False (default), raise the exception when parsing the server response.
             This default may be overridden in the context construction or in each
             individual context call.
-        timeout : float
+        timeout : float or 2-tuple
             HTTP request timeout in seconds.  If None, fall back to the object default.
+            If a 2-tuple, the first value pertains to the initial connection time,
+            and the second value pertains to the total transmission and response.
         ctx_kwargs :
             Any remaining keyword arguments are added as additional keywords to any
             method call made by this context.
@@ -769,7 +775,15 @@ class Context(SimpleContext):
         # until it's complete.
         post_kwargs = dict(json=calls, headers=headers)
         if self.timeout is not None:
-            post_kwargs["timeout"] = aiohttp.ClientTimeout(total=self.timeout)
+            opts = {}
+            if not isinstance(self.timeout, tuple):
+                opts["total"] = self.timeout
+            else:
+                if self.timeout[0] is not None:
+                    opts["sock_connect"] = self.timeout[0]
+                if self.timeout[1] is not None:
+                    opts["total"] = self.timeout[1]
+            post_kwargs["timeout"] = aiohttp.ClientTimeout(**opts)
         async with cs.post(self.uri, **post_kwargs) as resp:
             raw_out = await resp.read()
             if not resp.ok:
@@ -839,9 +853,11 @@ class SimpleTuberObject:
             raised as exceptions.  Otherwise, fall back to context default.  This
             default may be overridden in the context construction or in each
             individual context call.
-        timeout : float
+        timeout : float or 2-tuple
             HTTP request timeout in seconds.  If None, no timeout is applied.
             This default may be overridden in the context construction.
+            If a 2-tuple, the first value pertains to the initial connection time,
+            and the second value pertains to the total transmission and response.
         parent: SimpleTuberObject
             If given, assume this object is an attribute of this parent object.
         """
