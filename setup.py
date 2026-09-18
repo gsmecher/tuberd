@@ -14,6 +14,7 @@ from pathlib import Path
 from setuptools import Extension, setup
 from setuptools.command.build_ext import build_ext
 from setuptools.command.install import install
+from setuptools.errors import PlatformError
 
 
 # A CMakeExtension needs a sourcedir instead of a file list.
@@ -52,7 +53,7 @@ for arg in cmake_args:
 class CMakeBuild(build_ext):
     def build_extension(self, ext: CMakeExtension) -> None:
         if (sys.platform != "linux") and (not sys.platform.startswith("darwin")):
-            raise DistutilsPlatformError("Cannot compile tuberd on non-Linux platform!")
+            raise PlatformError("Cannot compile tuberd on non-Linux platform!")
 
         build_temp = Path(self.build_temp)
         if not build_temp.exists():

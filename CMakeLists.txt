@@ -29,6 +29,14 @@ endif()
 
 find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
 find_package(LibHttpServer REQUIRED)
+
+if(NOT pybind11_DIR)
+  execute_process(
+    COMMAND pybind11-config --cmakedir
+    OUTPUT_VARIABLE pybind11_DIR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+  )
+endif()
 find_package(pybind11 REQUIRED)
 find_package(Threads REQUIRED)
 
