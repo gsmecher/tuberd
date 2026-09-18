@@ -36,6 +36,9 @@ write_to = "tuber/_version.py"
 version_scheme = "only-version"
 local_scheme = "no-local-version"
 
+[tool.pytest.ini_options]
+asyncio_default_fixture_loop_scope = "module"
+
 [tool.black]
 line-length = 120
 

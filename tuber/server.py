@@ -59,8 +59,10 @@ def resolve_method(method, bound=True):
     if isinstance(sig, str):
         try:
             # build a dummy function to parse its signature with inspect
-            code = compile(f"def sigfunc{sig}:\n pass", "sigfunc", "single")
-            exec(code, globals())
+            namespace = {}
+            code = compile(f"def sigfunc{sig}:\n    pass", "sigfunc", "single")
+            exec(code, namespace)
+            sigfunc = namespace["sigfunc"]
             sig = inspect.signature(sigfunc)
         except:
             sig = None
@@ -660,7 +662,7 @@ def run(registry, json_module="json", port=80, webroot=None, max_age=3600, valid
 
     # import runtime
     if os.getenv("CMAKE_TEST"):
-        from _tuber_runtime import run_server
+        from _tuber_runtime import run_server  # type: ignore
     else:
         from ._tuber_runtime import run_server
 
