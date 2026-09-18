@@ -656,7 +656,7 @@ UNREACHABLE_HOST = "192.0.2.1:80"
 async def test_tuberpy_async_http_response_timeout_tuple(accept_types, tuberd_host):
     """HTTP response timeout via 2-tuple (connect, total) fires on slow responses."""
     s = await tuber.resolve(tuberd_host, "SlowObject", accept_types, timeout=(10, 0.1))
-    with pytest.raises(TimeoutError):
+    with pytest.raises(asyncio.TimeoutError):
         await s.sleep(0.5)
 
 
@@ -664,7 +664,7 @@ async def test_tuberpy_async_http_response_timeout_tuple(accept_types, tuberd_ho
 async def test_tuberpy_async_http_response_timeout_tuple_none_connect(accept_types, tuberd_host):
     """HTTP response timeout via 2-tuple (None, total) fires when only total is set."""
     s = await tuber.resolve(tuberd_host, "SlowObject", accept_types, timeout=(None, 0.1))
-    with pytest.raises(TimeoutError):
+    with pytest.raises(asyncio.TimeoutError):
         await s.sleep(0.5)
 
 
