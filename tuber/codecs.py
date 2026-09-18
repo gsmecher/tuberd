@@ -209,7 +209,7 @@ def decode_json_client(response_data, encoding, convert=True):
         if isinstance(obj, Mapping) and "bytes" in obj and (len(obj) == 1 or (len(obj) == 2 and "subtype" in obj)):
             try:
                 return bytes(obj["bytes"])
-            except e as ValueError:
+            except ValueError as e:
                 pass
         return TuberResult(**obj) if convert else obj
 
