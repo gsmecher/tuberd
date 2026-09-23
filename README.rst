@@ -55,10 +55,11 @@ Its main features and design principles are:
   exposed APIs only visible at the sites where RPC calls are made.
 
 - A mature, quick-ish, third-party, low-overhead, low-prerequisite embedded
-  webserver. Tuber uses libhttpserver_, which in turn, is a C++ wrapper around
-  the well-established libmicrohttpd_. We use the thread-per-connection
-  configuration because a single keep-alive connection with a single client is
-  the expected "hot path"; C10K_-style server architectures wouldn't be better.
+  webserver. Tuber uses cpp-httplib_, a single-header C++ library vendored
+  into the tree, so the server builds without any external HTTP dependencies.
+  Its blocking, thread-per-connection style suits us because a single
+  keep-alive connection with a single client is the expected "hot path";
+  C10K_-style server architectures wouldn't be better.
 
 - High performance when communicating with RPC endpoints, using:
 
@@ -117,11 +118,10 @@ licensing is a stumbling block for you, please contact me at
 .. _GPLv3: https://www.gnu.org/licenses/gpl-3.0.en.html
 .. _Jupyter: https://jupyter.org/
 .. _IPython: https://ipython.org/
-.. _libhttpserver: https://github.com/etr/libhttpserver
+.. _cpp-httplib: https://github.com/yhirose/cpp-httplib
 .. _NumPy: https://www.numpy.org
 .. _orjson: https://github.com/ijl/orjson
 .. _cbor2: https://github.com/agronholm/cbor2
-.. _libmicrohttpd: https://www.gnu.org/software/libmicrohttpd/
 .. _JSON-RPC: https://www.jsonrpc.org/
 .. _pybind11: https://pybind11.readthedocs.io/en/stable/index.html
 .. _C10K: http://www.kegel.com/c10k.html
@@ -138,26 +138,6 @@ CPython 3.8+:
 .. code:: bash
 
    pip install tuberd
-
-Building from source requires the ``libmicrohttpd`` and ``libhttpserver``
-dependencies.  To simplify the build process, the
-``wheels/install_deps.sh`` script can be used to build all the dependencies
-locally and compile against them.  In this instance, ``cmake`` should be able to
-discover the appropriate paths for all dependencies.  Use the ``BUILD_DEPS``
-``cmake`` argument to trigger this build with pip:
-
-.. code:: bash
-
-   CMAKE_ARGS="-DBUILD_DEPS=yes" pip install tuberd
-
-If you prefer to build the dependencies manually, to ensure that ``cmake`` can
-find the ``libhttpserver`` library, you may need to add the path where the
-``FindLibHttpServer.cmake`` file is installed to the ``CMAKE_MODULE_PATH``
-option, for example:
-
-.. code:: bash
-
-   CMAKE_ARGS="-DCMAKE_MODULE_PATH=/usr/local/share/cmake/Modules" pip install tuberd
 
 Optional dependencies may be installed to enable alternative encoding schemes (cbor, orjson)
 with and without numpy support, or the standard or asyncio-enabled client interface:

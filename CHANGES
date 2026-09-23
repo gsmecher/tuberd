@@ -1,3 +1,12 @@
+v0.18.6
+=======
+
+- Replace libhttpserver/libmicrohttpd with cpp-httplib, vendored as a single
+  header in extern/. Building from source no longer needs any external HTTP
+  dependency. The old libhttpserver API changed significantly with a 2.0
+  release, and with the 1.x API marked EOL, some churn was already coming our
+  way.
+
 v0.18.5
 =======
 

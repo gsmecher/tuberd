@@ -36,19 +36,16 @@ write_to = "tuber/_version.py"
 version_scheme = "only-version"
 local_scheme = "no-local-version"
 
+[tool.pytest.ini_options]
+asyncio_default_fixture_loop_scope = "module"
+
 [tool.black]
 line-length = 120
 
 [tool.cibuildwheel]
 test-extras = ["dev"]
-before-all = "./wheels/install_deps.sh"
 test-command = [
     "TUBER_DISABLE_SIMPLEJSON=1 pytest -sv {project}/tests/test.py --import-mode append",
     "pytest -sv {project}/tests/test.py --import-mode append --orjson",
     "pytest -sv {project}/tests/test.py --import-mode append --simplejson",
 ]
-
-[[tool.cibuildwheel.overrides]]
-select = "*-musllinux*"
-inherit.before-all = "prepend"
-before-all = "apk add --update automake autoconf libtool"

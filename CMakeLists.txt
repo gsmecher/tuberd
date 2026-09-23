@@ -8,27 +8,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++17")
 
-# build dependencies if requested
-option(BUILD_DEPS "Build library dependencies")
-
-if(BUILD_DEPS)
-	message(STATUS "Building dependencies: ${CMAKE_SOURCE_DIR}/deps")
-	execute_process(COMMAND ${CMAKE_SOURCE_DIR}/wheels/install_deps.sh
-		RESULT_VARIABLE STATUS)
-	if(STATUS AND NOT STATUS EQUAL 0)
-		message(FATAL_ERROR "Failed to install dependencies: ${STATUS}")
-	endif()
-endif()
-
-# link against deps dir
-if(EXISTS ${CMAKE_SOURCE_DIR}/deps)
-	message(STATUS "Found deps: ${CMAKE_SOURCE_DIR}/deps")
-	list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/deps/share/cmake/Modules")
-	list(APPEND CMAKE_PREFIX_PATH "${CMAKE_SOURCE_DIR}/deps")
-endif()
-
 find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
-find_package(LibHttpServer REQUIRED)
 
 if(NOT pybind11_DIR)
   execute_process(
@@ -43,8 +23,8 @@ find_package(Threads REQUIRED)
 include(CTest)
 
 pybind11_add_module(_tuber_runtime MODULE src/server.cpp)
-target_include_directories(_tuber_runtime PUBLIC ${LIBHTTPSERVER_INCLUDE_DIRS})
-target_link_libraries(_tuber_runtime PUBLIC ${LIBHTTPSERVER_LIBRARIES} Threads::Threads)
+target_include_directories(_tuber_runtime PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/extern/cpp-httplib)
+target_link_libraries(_tuber_runtime PRIVATE Threads::Threads)
 
 if(BUILD_TESTING)
 	message(STATUS "Building tests")
