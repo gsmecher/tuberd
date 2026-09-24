@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import argparse
 import inspect
-import json
 import os
 import warnings
 import functools
@@ -705,46 +704,6 @@ def load_registry(filename):
     return mod.registry
 
 
-class CodecOption(argparse.Action):
-    """
-    Collect ``KEY=VALUE`` command line options into a codec options dictionary.
-
-    Keys may be prefixed with ``encode:`` or ``decode:`` to bind the option in a
-    single direction; unprefixed options are bound to both.  Values are parsed as
-    JSON where possible and left as plain strings otherwise, so that
-    ``allow_nan=true`` yields ``True`` and ``indent=2`` yields ``2``.
-
-    The result is accumulated across repeated arguments into a dictionary suitable
-    for ``tuber.codecs.Codec.with_options()``.
-    """
-
-    def __call__(self, parser, namespace, value, option_string=None):
-        options = getattr(namespace, self.dest, None)
-        if options is None:
-            options = {"decode": {}, "encode": {}}
-            setattr(namespace, self.dest, options)
-
-        key, sep, val = value.partition("=")
-        if not sep:
-            parser.error(f"argument {option_string}: expected KEY=VALUE, got {value!r}")
-
-        target, tsep, name = key.partition(":")
-        if tsep:
-            if target not in options:
-                parser.error(f"argument {option_string}: invalid target {target!r} in {value!r}")
-            targets = [target]
-        else:
-            name, targets = key, list(options)
-
-        try:
-            val = json.loads(val)
-        except ValueError:
-            pass
-
-        for target in targets:
-            options[target][name] = val
-
-
 def main(registry=None):
     """
     Server entry point.
@@ -769,13 +728,11 @@ def main(registry=None):
         help="Python JSON module to use for serialization/deserialization",
     )
     P.add_argument(
-        "--json-option",
-        action=CodecOption,
-        dest="json_options",
-        metavar="[encode:|decode:]KEY=VALUE",
-        help="Keyword option to supply to the JSON codec, e.g. allow_nan=true.  May be "
-        "given multiple times, and prefixed with 'encode:' or 'decode:' to bind the "
-        "option in a single direction",
+        "--allow-nan",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Allow non-finite floats (NaN, Infinity, -Infinity) to be encoded and "
+        "decoded.  Ignored by JSON modules that do not accept the option",
     )
     P.add_argument("-p", "--port", default=80, type=int, help="Port")
     P.add_argument("-w", "--webroot", help="Location to serve static content")
@@ -790,6 +747,17 @@ def main(registry=None):
         "--validate", action="store_true", help="Validate incoming and outgoing data packets using jsonschema"
     )
     args = P.parse_args()
+
+    # simplejson accepts allow_nan when decoding as well as encoding; the standard
+    # library reads non-finite floats unconditionally and accepts it only when
+    # encoding.  orjson accepts it in neither direction, and is always strict.
+    allow_nan = {"allow_nan": vars(args).pop("allow_nan")}
+    if args.json_module == "simplejson":
+        args.json_options = {"decode": allow_nan, "encode": allow_nan}
+    elif args.json_module == "json":
+        args.json_options = {"encode": allow_nan}
+    else:
+        args.json_options = None
 
     # setup environment
     os.environ["TUBER_SERVER"] = "1"

@@ -13,12 +13,14 @@ import requests
 import warnings
 import tuber
 
+from tuber import codecs
+
 if os.getenv("CMAKE_TEST"):
     import test_module as tm
 else:
     from tuber.tests import test_module as tm
 
-from tuber.server import TuberContainer, TuberArray
+from tuber.server import RequestHandler, TuberContainer, TuberArray
 
 
 # REGISTRY DEFINITIONS
@@ -329,9 +331,7 @@ def test_neginf_value(tuber_call):
 def test_codec_with_options():
     """Codec options are bound to a copy, leaving the registered codec untouched"""
 
-    from tuber.codecs import Codecs
-
-    codec = Codecs["json"]
+    codec = codecs.Codecs["json"]
     bound = codec.with_options(decode={"parse_int": float}, encode={"indent": 2})
 
     assert bound.decode_options["parse_int"] is float
@@ -343,41 +343,10 @@ def test_codec_with_options():
     assert bound.with_options(encode={"sort_keys": True}).encode_options == {"indent": 2, "sort_keys": True}
 
 
-def test_cli_json_options():
-    """--json-option arguments are collected into a codec options dictionary"""
-
-    import argparse
-    from tuber.server import CodecOption
-
-    P = argparse.ArgumentParser(prog="tuberd")
-    P.add_argument("--json-option", action=CodecOption, dest="json_options")
-
-    assert P.parse_args([]).json_options is None
-
-    # unprefixed options are bound to both directions, prefixed ones to one, and
-    # values are parsed as JSON where possible and left as strings otherwise
-    args = P.parse_args(
-        ["--json-option", "allow_nan=true", "--json-option", "encode:indent=2", "--json-option", "decode:x=abc"]
-    )
-    assert args.json_options == {
-        "decode": {"allow_nan": True, "x": "abc"},
-        "encode": {"allow_nan": True, "indent": 2},
-    }
-
-    # each parse accumulates into its own dictionary
-    assert P.parse_args(["--json-option", "a=1"]).json_options["encode"] == {"a": 1}
-
-    # malformed arguments are reported by argparse, which exits rather than raising
-    for bad in ["nonsense", "bogus:x=1"]:
-        with pytest.raises(SystemExit):
-            P.parse_args(["--json-option", bad])
-
-
 def test_server_json_options():
     """The server binds codec options supplied as a dictionary"""
 
     pytest.importorskip("simplejson")
-    from tuber.server import RequestHandler
 
     handler = RequestHandler(
         {},
@@ -387,6 +356,38 @@ def test_server_json_options():
     codec = handler.codecs["application/json"]
     assert codec.decode_options == {"allow_nan": True}
     assert codec.encode_options["allow_nan"] is True and codec.encode_options["indent"] == 2
+
+
+def tuberd_post(host, **request):
+    """Issue a single JSON request against the given tuberd, without converting"""
+
+    response = requests.post(f"http://{host}/tuber", json=request, headers={"Accept": "application/json"})
+    return codecs.AcceptTypes["application/json"](response.content, "utf-8", convert=False)
+
+
+@pytest.mark.parametrize("json_module", ["json", "simplejson"])
+def test_server_no_allow_nan(spawn_tuberd, json_module):
+    """--no-allow-nan makes the server refuse to encode non-finite floats"""
+
+    pytest.importorskip(json_module)
+    host = spawn_tuberd("--json", json_module, "--no-allow-nan")
+
+    # the default is exercised by the NaN round-trip tests above
+    message = tuberd_post(host, object="Types", method="nan_function")["error"]["message"]
+    assert "not JSON compliant" in message
+
+    # ordinary floats are unaffected
+    assert tuberd_post(host, object="Types", method="float_function") == Succeeded(pytest.approx(Types.FLOAT))
+
+
+def test_server_allow_nan_skipped_for_orjson(spawn_tuberd):
+    """orjson accepts no allow_nan option, so the server must not bind one"""
+
+    pytest.importorskip("orjson")
+
+    # were allow_nan bound here, orjson.dumps() would raise on the first response
+    host = spawn_tuberd("--json", "orjson", "--no-allow-nan")
+    assert tuberd_post(host, object="Types", method="string_function") == Succeeded(Types.STRING)
 
 
 #

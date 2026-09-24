@@ -303,7 +303,7 @@ if have_simplejson:
     # Unlike the standard library, simplejson defaults to allow_nan=False for both
     # loads() and dumps(), so non-finite floats raise unless the caller binds
     # allow_nan=True - e.g. Codecs["simplejson"].with_options(...), or the
-    # --json-option command line argument.
+    # --allow-nan command line argument.
 
     def decode_simplejson(response_data, **kwargs):
         return simplejson.loads(response_data, **kwargs)

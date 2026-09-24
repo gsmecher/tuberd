@@ -5,7 +5,6 @@ import socket
 import subprocess
 import sys
 import time
-import warnings
 
 from tuber import codecs
 
@@ -54,42 +53,15 @@ def tuberd_host(pytestconfig):
     return f"localhost:{pytestconfig.getoption('tuberd_port')}"
 
 
-@pytest.fixture(scope="module", autouse=True)
-def tuberd(request, pytestconfig):
-    """Spawn (and kill) a tuberd"""
-
-    TUBERD_PORT = pytestconfig.getoption("tuberd_port")
+def run_tuberd(registry, port, *args):
+    """Spawn a tuberd, and wait for it to start listening"""
 
     if os.getenv("CMAKE_TEST"):
-        tuberd = [sys.executable, "-m", "tuber.server"]
+        argv = [sys.executable, "-m", "tuber.server"]
     else:
-        tuberd = ["tuberd"]
+        argv = ["tuberd"]
 
-    registry = request.node.fspath
-
-    argv = tuberd + [
-        f"-p{TUBERD_PORT}",
-        f"--registry={registry}",
-        f"--validate",
-    ]
-
-    argv.extend(pytestconfig.getoption("tuberd_option"))
-
-    if pytestconfig.getoption("orjson"):
-        # If we can't import orjson here, it's presumably missing from the
-        # tuberd execution environment as well - in which case, we should skip
-        # the test.
-        pytest.importorskip("orjson")
-        argv.extend(["--json", "orjson"])
-
-    if pytestconfig.getoption("simplejson"):
-        # If we can't import simplejson here, it's presumably missing from the
-        # tuberd execution environment as well - in which case, we should skip
-        # the test.
-        pytest.importorskip("simplejson")
-        # Unlike the standard library, simplejson rejects non-finite floats unless
-        # allow_nan is bound, so set it here to keep the wire format consistent.
-        argv.extend(["--json", "simplejson", "--json-option", "allow_nan=true"])
+    argv += [f"-p{port}", f"--registry={registry}", "--validate", *args]
 
     s = subprocess.Popen(argv)
 
@@ -99,7 +71,7 @@ def tuberd(request, pytestconfig):
         if s.poll() is not None:
             raise RuntimeError(f"tuberd exited on startup with code {s.returncode}")
         try:
-            with socket.create_connection(("localhost", int(TUBERD_PORT)), timeout=0.1):
+            with socket.create_connection(("localhost", int(port)), timeout=0.1):
                 break
         except OSError:
             time.sleep(0.1)
@@ -107,8 +79,59 @@ def tuberd(request, pytestconfig):
         s.terminate()
         raise RuntimeError("tuberd did not start listening")
 
+    return s
+
+
+@pytest.fixture(scope="module", autouse=True)
+def tuberd(request, pytestconfig):
+    """Spawn (and kill) a tuberd"""
+
+    args = list(pytestconfig.getoption("tuberd_option"))
+
+    if pytestconfig.getoption("orjson"):
+        # If we can't import orjson here, it's presumably missing from the
+        # tuberd execution environment as well - in which case, we should skip
+        # the test.
+        pytest.importorskip("orjson")
+        args += ["--json", "orjson"]
+
+    if pytestconfig.getoption("simplejson"):
+        # If we can't import simplejson here, it's presumably missing from the
+        # tuberd execution environment as well - in which case, we should skip
+        # the test.
+        pytest.importorskip("simplejson")
+        args += ["--json", "simplejson"]
+
+    s = run_tuberd(request.node.fspath, pytestconfig.getoption("tuberd_port"), *args)
+
     yield s
     s.terminate()
+
+
+@pytest.fixture
+def spawn_tuberd(request):
+    """
+    Spawn additional tuberd instances with custom command line arguments.
+
+    Each is given a port of its own, so as not to collide with the tuberd shared
+    by the rest of the module, and is terminated when the test ends.  Returns the
+    host on which the new server is listening.
+    """
+
+    servers = []
+
+    def spawn(*args):
+        with socket.socket() as s:
+            s.bind(("localhost", 0))
+            port = s.getsockname()[1]
+        servers.append(run_tuberd(request.node.fspath, port, *args))
+        return f"localhost:{port}"
+
+    yield spawn
+
+    for s in servers:
+        s.terminate()
+        s.wait()
 
 
 # This fixture provides a much simpler, synchronous wrapper for functionality
