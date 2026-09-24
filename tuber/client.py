@@ -407,14 +407,10 @@ class SimpleContext:
             calls.append(c)
             futures.append(f)
 
-        if not hasattr(self.obj, "_tuber_session"):
-            # session object should persist beyond the lifetime of the context,
-            # akin to the asyncio event loop
-            from requests_futures.sessions import FuturesSession
-
-            self.obj._tuber_session = FuturesSession()
-
-        cs = self.obj._tuber_session
+        # The requests session (connection pool) belongs to the object tree,
+        # akin to the asyncio event loop for the async client; it persists
+        # beyond the lifetime of the context.
+        cs = self.obj._tuber_requests_session
 
         # Declare the media types we want to allow getting back
         headers = {"Accept": ", ".join(self.accept_types)}
@@ -728,7 +724,7 @@ class Context(SimpleContext):
         # hide import for non-library package that may not be invoked
         import aiohttp
 
-        if not hasattr(loop, "_tuber_session"):
+        if not hasattr(loop, "_tuber_aiohttp_session"):
 
             # aiohttp.resolver.AsyncResolver does not support mDNS and is the
             # DefaultResolver. Instead, we try to force the use of an
@@ -740,7 +736,7 @@ class Context(SimpleContext):
                 Resolver = aiohttp.resolver.ThreadedResolver
 
             # Monkey-patch tuber session memory handling with the running event loop
-            loop._tuber_session = aiohttp.ClientSession(
+            loop._tuber_aiohttp_session = aiohttp.ClientSession(
                 json_serialize=Codecs["json"].encode, connector=aiohttp.TCPConnector(resolver=Resolver())
             )
 
@@ -751,15 +747,15 @@ class Context(SimpleContext):
             loop_close = loop.close
 
             def close(self):
-                if hasattr(self, "_tuber_session"):
+                if hasattr(self, "_tuber_aiohttp_session"):
                     if not self.is_closed():
-                        self.run_until_complete(self._tuber_session.close())
-                    del self._tuber_session
+                        self.run_until_complete(self._tuber_aiohttp_session.close())
+                    del self._tuber_aiohttp_session
                 loop_close()
 
             loop.close = types.MethodType(close, loop)
 
-        cs = loop._tuber_session
+        cs = loop._tuber_aiohttp_session
 
         if convert_json is None:
             convert_json = self.convert_json
@@ -877,6 +873,19 @@ class SimpleTuberObject:
             self._convert_json = parent._convert_json
             self._return_exceptions = parent._return_exceptions
             self._timeout = parent._timeout
+
+        # A root object owns a requests session (connection pool) for its
+        # whole tree of attributes and container items, in the same way that
+        # the async client keeps one aiohttp session per event loop; children
+        # share their parent's. The async client keeps its session on the
+        # loop instead (see Context.__call__), so its objects carry none.
+        if not issubclass(self._context_class, Context):
+            if parent is None:
+                from requests_futures.sessions import FuturesSession
+
+                self._tuber_requests_session = FuturesSession()
+            else:
+                self._tuber_requests_session = parent._tuber_requests_session
 
     @property
     def is_container(self):
