@@ -892,6 +892,39 @@ def test_tuberpy_client_json_options(accept_types, tuberd_host):
         s.float_function(float("nan"))
 
 
+@pytest.mark.no_orjson
+def test_tuberpy_client_json_module(accept_types, tuberd_host):
+    """The client can select which JSON implementation it uses"""
+
+    pytest.importorskip("simplejson")
+
+    # simplejson is strict about non-finite floats out of the box
+    s = tuber.resolve_simple(tuberd_host, "Types", accept_types, json_module="simplejson")
+    assert s.string_function() == Types.STRING
+    with pytest.raises(ValueError):
+        s.float_function(float("nan"))
+
+    # ...until the option is bound, at which point they round-trip
+    s = tuber.resolve_simple(
+        tuberd_host,
+        "Types",
+        accept_types,
+        json_module="simplejson",
+        json_options={"encode": {"allow_nan": True}, "decode": {"allow_nan": True}},
+    )
+    assert math.isnan(s.float_function(float("nan")))
+
+
+def test_tuberpy_client_json_module_unsupported(accept_types, tuberd_host):
+    """Codecs that cannot drive the client decoder are rejected up front"""
+
+    # orjson.loads() takes no keyword arguments, so it cannot supply the object_hook
+    # that the client decoder needs to rebuild TuberResults and unwrap bytes
+    for module in ["orjson", "does-not-exist"]:
+        with pytest.raises(ValueError, match="Unsupported client JSON codec"):
+            tuber.resolve_simple(tuberd_host, "Types", accept_types, json_module=module)
+
+
 @pytest.mark.parametrize("return_exceptions", [True, False])
 @pytest.mark.asyncio
 async def test_tuberpy_return_exceptions(return_exceptions, resolve):

@@ -308,9 +308,18 @@ if have_orjson:
     Codecs["orjson"] = Codec(decode=decode_orjson, encode=encode_orjson)
 
 
+# Codec names that can drive the client-side JSON decoder.  That decoder relies on
+# object_hook to rebuild TuberResult objects and to unwrap encoded bytes, which
+# orjson does not support - orjson.loads() accepts no keyword arguments at all.
+JsonClientCodecs = ("json", "simplejson")
+
+
 def make_json_decoder(codec):
     """
     Build a client-side decode function for JSON responses from the given codec.
+
+    The codec's decode function must accept an ``object_hook`` keyword; see
+    ``JsonClientCodecs`` for the codecs that qualify.
     """
 
     def decode_json_client(response_data, encoding, convert=True):

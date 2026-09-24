@@ -12,7 +12,7 @@ import inspect
 import functools
 
 from . import TuberError, TuberStateError, TuberRemoteError
-from .codecs import AcceptTypes, Codecs, TuberResult, make_json_decoder
+from .codecs import AcceptTypes, Codecs, JsonClientCodecs, TuberResult, make_json_decoder
 
 __all__ = [
     "TuberObject",
@@ -29,6 +29,7 @@ async def resolve(
     convert_json: bool | None = None,
     return_exceptions: bool | None = None,
     timeout: float | None = None,
+    json_module: str | None = None,
     json_options: dict | None = None,
 ):
     """Create a local reference to a networked resource.
@@ -59,10 +60,14 @@ async def resolve(
         default may be overridden in the context construction.
         If a 2-tuple, the first value pertains to the initial connection time,
         and the second value pertains to the total transmission and response.
+    json_module : str
+        Python package used to encode requests and decode JSON responses, one of
+        ``tuber.codecs.JsonClientCodecs``.  This default may be overridden in the
+        context construction.
     json_options : dict
-        Keyword options to bind to the JSON codec used to decode responses, with
-        optional ``encode`` and ``decode`` entries.  This default may be overridden
-        in the context construction.  See ``tuber.codecs.Codec.with_options()``.
+        Keyword options to bind to the JSON codec, with optional ``encode`` and
+        ``decode`` entries.  This default may be overridden in the context
+        construction.  See ``tuber.codecs.Codec.with_options()``.
 
     Returns
     -------
@@ -78,6 +83,7 @@ async def resolve(
         convert_json=convert_json,
         return_exceptions=return_exceptions,
         timeout=timeout,
+        json_module=json_module,
         json_options=json_options,
     )
     await instance.tuber_resolve()
@@ -91,6 +97,7 @@ def resolve_simple(
     convert_json: bool | None = None,
     return_exceptions: bool | None = None,
     timeout: float | None = None,
+    json_module: str | None = None,
     json_options: dict | None = None,
 ):
     """Create a local reference to a networked resource.
@@ -121,10 +128,14 @@ def resolve_simple(
         default may be overridden in the context construction.
         If a 2-tuple, the first value pertains to the initial connection time,
         and the second value pertains to the total transmission and response.
+    json_module : str
+        Python package used to encode requests and decode JSON responses, one of
+        ``tuber.codecs.JsonClientCodecs``.  This default may be overridden in the
+        context construction.
     json_options : dict
-        Keyword options to bind to the JSON codec used to decode responses, with
-        optional ``encode`` and ``decode`` entries.  This default may be overridden
-        in the context construction.  See ``tuber.codecs.Codec.with_options()``.
+        Keyword options to bind to the JSON codec, with optional ``encode`` and
+        ``decode`` entries.  This default may be overridden in the context
+        construction.  See ``tuber.codecs.Codec.with_options()``.
 
     Returns
     -------
@@ -140,6 +151,7 @@ def resolve_simple(
         convert_json=convert_json,
         return_exceptions=return_exceptions,
         timeout=timeout,
+        json_module=json_module,
         json_options=json_options,
     )
     instance.tuber_resolve()
@@ -305,6 +317,7 @@ class SimpleContext:
         convert_json: bool | None = None,
         return_exceptions: bool | None = None,
         timeout: float | None = None,
+        json_module: str | None = None,
         json_options: dict | None = None,
         **ctx_kwargs,
     ):
@@ -328,10 +341,14 @@ class SimpleContext:
             HTTP request timeout in seconds.  If None, fall back to the object default.
             If a 2-tuple, the first value pertains to the initial connection time,
             and the second value pertains to the total transmission and response.
+        json_module : str
+            Python package used to encode requests and decode JSON responses, one of
+            ``tuber.codecs.JsonClientCodecs``.  If None, fall back to the object
+            default.
         json_options : dict
-            Keyword options to bind to the JSON codec used to decode responses, with
-            optional ``encode`` and ``decode`` entries.  If None, fall back to the
-            object default.  See ``tuber.codecs.Codec.with_options()``.
+            Keyword options to bind to the JSON codec, with optional ``encode`` and
+            ``decode`` entries.  If None, fall back to the object default.  See
+            ``tuber.codecs.Codec.with_options()``.
         ctx_kwargs :
             Any remaining keyword arguments are added as additional keywords to any
             method call made by this context.
@@ -348,14 +365,26 @@ class SimpleContext:
                 if accept_type not in AcceptTypes.keys():
                     raise ValueError(f"Unsupported accept type: {accept_type}")
             self.accept_types = accept_types
+        if json_module is None:
+            json_module = self.obj._json_module
+        if json_module is None:
+            json_module = "json"
+        if json_module not in JsonClientCodecs:
+            raise ValueError(
+                f"Unsupported client JSON codec: {json_module}. Choose one of {', '.join(JsonClientCodecs)}"
+            )
+        if json_module not in Codecs:
+            raise ValueError(f"JSON codec {json_module} is not available")
         if json_options is None:
             json_options = self.obj._json_options
+        codec = Codecs[json_module]
         if json_options:
-            self.json_codec = Codecs["json"].with_options(**json_options)
-            self.accept_handlers = {**AcceptTypes, "application/json": make_json_decoder(self.json_codec)}
-        else:
-            self.json_codec = Codecs["json"]
+            codec = codec.with_options(**json_options)
+        self.json_codec = codec
+        if json_module == "json" and not json_options:
             self.accept_handlers = AcceptTypes
+        else:
+            self.accept_handlers = {**AcceptTypes, "application/json": make_json_decoder(codec)}
         if convert_json is None:
             convert_json = self.obj._convert_json
         self.convert_json = True if convert_json is None else convert_json
@@ -866,6 +895,7 @@ class SimpleTuberObject:
         convert_json: bool | None = None,
         return_exceptions: bool | None = None,
         timeout: float | None = None,
+        json_module: str | None = None,
         json_options: dict | None = None,
         parent: "SimpleTuberObject" | None = None,
     ):
@@ -895,10 +925,14 @@ class SimpleTuberObject:
             This default may be overridden in the context construction.
             If a 2-tuple, the first value pertains to the initial connection time,
             and the second value pertains to the total transmission and response.
+        json_module : str
+            Python package used to encode requests and decode JSON responses, one of
+            ``tuber.codecs.JsonClientCodecs``.  This default may be overridden in the
+            context construction.
         json_options : dict
-            Keyword options to bind to the JSON codec used to decode responses, with
-            optional ``encode`` and ``decode`` entries.  This default may be overridden
-            in the context construction.  See ``tuber.codecs.Codec.with_options()``.
+            Keyword options to bind to the JSON codec, with optional ``encode`` and
+            ``decode`` entries.  This default may be overridden in the context
+            construction.  See ``tuber.codecs.Codec.with_options()``.
         parent: SimpleTuberObject
             If given, assume this object is an attribute of this parent object.
         """
@@ -912,6 +946,7 @@ class SimpleTuberObject:
             self._convert_json = convert_json
             self._return_exceptions = return_exceptions
             self._timeout = timeout
+            self._json_module = json_module
             self._json_options = json_options
         else:
             self._tuber_host = parent._tuber_host
@@ -919,6 +954,7 @@ class SimpleTuberObject:
             self._convert_json = parent._convert_json
             self._return_exceptions = parent._return_exceptions
             self._timeout = parent._timeout
+            self._json_module = parent._json_module
             self._json_options = parent._json_options
 
         # A root object owns a requests session (connection pool) for its
