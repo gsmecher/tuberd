@@ -881,6 +881,20 @@ def test_tuberpy_fake_async(accept_types, tuberd_host):
     assert r2 == Types.INTEGER
 
 
+@pytest.mark.no_orjson
+def test_tuberpy_client_json_options(accept_types, tuberd_host):
+    """Options bound to the client JSON codec are applied when encoding requests"""
+
+    # by default the client encodes non-finite floats, matching the standard library
+    s = tuber.resolve_simple(tuberd_host, "Types", accept_types)
+    assert math.isnan(s.float_function(float("nan")))
+
+    # binding allow_nan=False makes the client refuse to encode them
+    s = tuber.resolve_simple(tuberd_host, "Types", accept_types, json_options={"encode": {"allow_nan": False}})
+    with pytest.raises(ValueError):
+        s.float_function(float("nan"))
+
+
 @pytest.mark.parametrize("return_exceptions", [True, False])
 @pytest.mark.asyncio
 async def test_tuberpy_return_exceptions(return_exceptions, resolve):

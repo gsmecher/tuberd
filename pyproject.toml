@@ -45,7 +45,7 @@ line-length = 120
 [tool.cibuildwheel]
 test-extras = ["dev"]
 test-command = [
-    "TUBER_DISABLE_SIMPLEJSON=1 pytest -sv {project}/tests/test.py --import-mode append",
+    "pytest -sv {project}/tests/test.py --import-mode append",
     "pytest -sv {project}/tests/test.py --import-mode append --orjson",
     "pytest -sv {project}/tests/test.py --import-mode append --simplejson",
 ]

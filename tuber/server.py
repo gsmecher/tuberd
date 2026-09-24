@@ -8,7 +8,7 @@ import functools
 import sys
 import traceback
 
-from .codecs import Codecs
+from .codecs import Codecs, parse_codec_options
 from . import schema
 
 __all__ = ["TuberRegistry", "TuberContainer", "TuberArray", "run", "main"]
@@ -357,7 +357,14 @@ class RequestHandler:
     Tuber server request handler.
     """
 
-    def __init__(self, registry, json_module="json", default_format="application/json", validate=False):
+    def __init__(
+        self,
+        registry,
+        json_module="json",
+        default_format="application/json",
+        validate=False,
+        json_options=None,
+    ):
         """
         Arguments
         ---------
@@ -370,6 +377,9 @@ class RequestHandler:
             Default encoding format to assume for requests and responses.
         validate : bool
             If True, validate incoming and outgoing packets with jsonschema.
+        json_options : dict
+            Keyword options to bind to the JSON codec, with optional ``encode``
+            and ``decode`` entries.  See ``tuber.codecs.Codec.with_options()``.
         """
         # ensure registry is a dictionary
         assert isinstance(registry, (dict, TuberRegistry)), "Invalid registry"
@@ -381,9 +391,11 @@ class RequestHandler:
         self.codecs = {}
 
         try:
-            self.codecs["application/json"] = Codecs[json_module]
+            codec = Codecs[json_module]
         except Exception as e:
             raise RuntimeError(f"Unable to import {json_module} codec ({str(e)})")
+
+        self.codecs["application/json"] = codec.with_options(**json_options) if json_options else codec
 
         try:
             self.codecs["application/cbor"] = Codecs["cbor"]
@@ -638,7 +650,7 @@ class RequestHandler:
         return self.handle(*args, **kwargs)
 
 
-def run(registry, json_module="json", port=80, webroot=None, max_age=3600, validate=False):
+def run(registry, json_module="json", port=80, webroot=None, max_age=3600, validate=False, json_options=None):
     """
     Run tuber server with the given registry.
 
@@ -656,6 +668,9 @@ def run(registry, json_module="json", port=80, webroot=None, max_age=3600, valid
         Maximum cache residency for static (file) assets
     validate : bool
         If True, validate incoming and outgoing data packets using jsonschema
+    json_options : dict
+        Keyword options to bind to the JSON codec, with optional ``encode`` and
+        ``decode`` entries.  See ``tuber.codecs.Codec.with_options()``.
     """
     # setup environment
     os.environ["TUBER_SERVER"] = "1"
@@ -667,7 +682,7 @@ def run(registry, json_module="json", port=80, webroot=None, max_age=3600, valid
         from ._tuber_runtime import run_server
 
     # prepare handler
-    handler = RequestHandler(registry, json_module, validate=validate)
+    handler = RequestHandler(registry, json_module, validate=validate, json_options=json_options)
 
     # run
     run_server(handler, port=port, webroot=webroot, max_age=max_age)
@@ -713,6 +728,16 @@ def main(registry=None):
         dest="json_module",
         help="Python JSON module to use for serialization/deserialization",
     )
+    P.add_argument(
+        "--json-option",
+        action="append",
+        default=[],
+        dest="json_options",
+        metavar="[encode:|decode:]KEY=VALUE",
+        help="Keyword option to supply to the JSON codec, e.g. allow_nan=true.  May be "
+        "given multiple times, and prefixed with 'encode:' or 'decode:' to bind the "
+        "option in a single direction",
+    )
     P.add_argument("-p", "--port", default=80, type=int, help="Port")
     P.add_argument("-w", "--webroot", help="Location to serve static content")
     P.add_argument(
@@ -726,6 +751,7 @@ def main(registry=None):
         "--validate", action="store_true", help="Validate incoming and outgoing data packets using jsonschema"
     )
     args = P.parse_args()
+    args.json_options = parse_codec_options(args.json_options)
 
     # setup environment
     os.environ["TUBER_SERVER"] = "1"

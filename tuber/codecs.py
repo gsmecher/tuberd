@@ -1,6 +1,5 @@
 from collections.abc import Sequence, Mapping
-from collections import namedtuple
-import os
+import json
 import sys
 import types
 
@@ -11,16 +10,11 @@ try:
 except ImportError:
     have_numpy = False
 
-# Prefer SimpleJSON, but fall back on built-in
 try:
-    if os.environ.get("TUBER_DISABLE_SIMPLEJSON"):
-        raise ImportError
-    import simplejson as json
+    import simplejson
 
     have_simplejson = True
 except ImportError:
-    import json  # type: ignore[no-redef]
-
     have_simplejson = False
 
 try:
@@ -175,23 +169,113 @@ AcceptTypes = {}
 # decoding and encoding functions.  The interface for each should match that of json.loads() and
 # json.dumps(), respectively.
 Codecs = {}
-Codec = namedtuple("Codec", ["decode", "encode"])
+
+
+class Codec:
+    """
+    A decode/encode function pair, with default keyword options bound to each.
+
+    The two callables follow the interfaces of ``json.loads()`` and ``json.dumps()``.
+    Bound options are supplied to every call; keywords given at the call site take
+    precedence over them.
+    """
+
+    def __init__(self, decode, encode, decode_options=None, encode_options=None):
+        self._decode = decode
+        self._encode = encode
+        self.decode_options = dict(decode_options or {})
+        self.encode_options = dict(encode_options or {})
+
+    def decode(self, data, **kwargs):
+        return self._decode(data, **{**self.decode_options, **kwargs})
+
+    def encode(self, obj, **kwargs):
+        return self._encode(obj, **{**self.encode_options, **kwargs})
+
+    def with_options(self, decode=None, encode=None):
+        """
+        Return a copy of this codec with additional default options bound to it.
+
+        Arguments
+        ---------
+        decode : dict
+            Keyword options to supply to the decode function.
+        encode : dict
+            Keyword options to supply to the encode function.
+        """
+        return Codec(
+            self._decode,
+            self._encode,
+            {**self.decode_options, **(decode or {})},
+            {**self.encode_options, **(encode or {})},
+        )
+
+
+def parse_codec_options(options):
+    """
+    Parse a sequence of ``KEY=VALUE`` strings into a codec options dictionary.
+
+    Keys may be prefixed with ``encode:`` or ``decode:`` to bind the option in a
+    single direction; unprefixed options are bound to both.  Values are parsed as
+    JSON where possible and left as plain strings otherwise, so that
+    ``allow_nan=true`` yields ``True`` and ``indent=2`` yields ``2``.
+
+    Returns a dictionary suitable for passing to ``Codec.with_options()``.
+    """
+    parsed = {"decode": {}, "encode": {}}
+
+    for option in options:
+        key, sep, value = option.partition("=")
+        if not sep:
+            raise ValueError(f"Invalid codec option {option!r}, expected KEY=VALUE")
+
+        target, tsep, name = key.partition(":")
+        if tsep:
+            if target not in parsed:
+                raise ValueError(f"Invalid codec option target {target!r} in {option!r}")
+            targets = [target]
+        else:
+            name, targets = key, list(parsed)
+
+        try:
+            value = json.loads(value)
+        except ValueError:
+            pass
+
+        for target in targets:
+            parsed[target][name] = value
+
+    return parsed
 
 
 def decode_json(response_data, **kwargs):
-    if have_simplejson:
-        kwargs.setdefault("allow_nan", True)
     return json.loads(response_data, **kwargs)
 
 
 def encode_json(obj, **kwargs):
-    if have_simplejson:
-        kwargs.setdefault("allow_nan", True)
-        kwargs.setdefault("encoding", None)
     return json.dumps(obj, default=wrap_bytes_for_json, **kwargs)
 
 
 Codecs["json"] = Codec(decode=decode_json, encode=encode_json)
+
+
+if have_simplejson:
+    # Unlike the standard library, simplejson defaults to allow_nan=False for both
+    # loads() and dumps(), so non-finite floats raise unless the caller binds
+    # allow_nan=True - e.g. Codecs["simplejson"].with_options(...), or the
+    # --json-option command line argument.
+
+    def decode_simplejson(response_data, **kwargs):
+        return simplejson.loads(response_data, **kwargs)
+
+    def encode_simplejson(obj, **kwargs):
+        return simplejson.dumps(obj, default=wrap_bytes_for_json, **kwargs)
+
+    Codecs["simplejson"] = Codec(
+        decode=decode_simplejson,
+        encode=encode_simplejson,
+        encode_options={"encoding": None},
+    )
 
 if have_orjson:
     # If using orjson with NumPy, overload dumps with the right magic
@@ -207,20 +291,29 @@ if have_orjson:
     Codecs["orjson"] = Codec(decode=decode_orjson, encode=encode_orjson)
 
 
-def decode_json_client(response_data, encoding, convert=True):
-    if encoding is None:  # guess the typical default if unspecified
-        encoding = "utf-8"
+def make_json_decoder(codec):
+    """
+    Build a client-side decode function for JSON responses from the given codec.
+    """
 
-    def ohook(obj):
-        if isinstance(obj, Mapping) and "bytes" in obj and (len(obj) == 1 or (len(obj) == 2 and "subtype" in obj)):
-            try:
-                return bytes(obj["bytes"])
-            except ValueError as e:
-                pass
-        return TuberResult(**obj) if convert else obj
+    def decode_json_client(response_data, encoding, convert=True):
+        if encoding is None:  # guess the typical default if unspecified
+            encoding = "utf-8"
 
-    return decode_json(response_data.decode(encoding), object_hook=ohook)
+        def ohook(obj):
+            if isinstance(obj, Mapping) and "bytes" in obj and (len(obj) == 1 or (len(obj) == 2 and "subtype" in obj)):
+                try:
+                    return bytes(obj["bytes"])
+                except ValueError:
+                    pass
+            return TuberResult(**obj) if convert else obj
 
+        return codec.decode(response_data.decode(encoding), object_hook=ohook)
+
+    return decode_json_client
+
+
+decode_json_client = make_json_decoder(Codecs["json"])
 
 AcceptTypes["application/json"] = decode_json_client
 

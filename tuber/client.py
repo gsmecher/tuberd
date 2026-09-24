@@ -12,7 +12,7 @@ import inspect
 import functools
 
 from . import TuberError, TuberStateError, TuberRemoteError
-from .codecs import AcceptTypes, Codecs, TuberResult
+from .codecs import AcceptTypes, Codecs, TuberResult, make_json_decoder
 
 __all__ = [
     "TuberObject",
@@ -29,6 +29,7 @@ async def resolve(
     convert_json: bool | None = None,
     return_exceptions: bool | None = None,
     timeout: float | None = None,
+    json_options: dict | None = None,
 ):
     """Create a local reference to a networked resource.
 
@@ -58,6 +59,10 @@ async def resolve(
         default may be overridden in the context construction.
         If a 2-tuple, the first value pertains to the initial connection time,
         and the second value pertains to the total transmission and response.
+    json_options : dict
+        Keyword options to bind to the JSON codec used to decode responses, with
+        optional ``encode`` and ``decode`` entries.  This default may be overridden
+        in the context construction.  See ``tuber.codecs.Codec.with_options()``.
 
     Returns
     -------
@@ -73,6 +78,7 @@ async def resolve(
         convert_json=convert_json,
         return_exceptions=return_exceptions,
         timeout=timeout,
+        json_options=json_options,
     )
     await instance.tuber_resolve()
     return instance
@@ -85,6 +91,7 @@ def resolve_simple(
     convert_json: bool | None = None,
     return_exceptions: bool | None = None,
     timeout: float | None = None,
+    json_options: dict | None = None,
 ):
     """Create a local reference to a networked resource.
 
@@ -114,6 +121,10 @@ def resolve_simple(
         default may be overridden in the context construction.
         If a 2-tuple, the first value pertains to the initial connection time,
         and the second value pertains to the total transmission and response.
+    json_options : dict
+        Keyword options to bind to the JSON codec used to decode responses, with
+        optional ``encode`` and ``decode`` entries.  This default may be overridden
+        in the context construction.  See ``tuber.codecs.Codec.with_options()``.
 
     Returns
     -------
@@ -129,6 +140,7 @@ def resolve_simple(
         convert_json=convert_json,
         return_exceptions=return_exceptions,
         timeout=timeout,
+        json_options=json_options,
     )
     instance.tuber_resolve()
     return instance
@@ -293,6 +305,7 @@ class SimpleContext:
         convert_json: bool | None = None,
         return_exceptions: bool | None = None,
         timeout: float | None = None,
+        json_options: dict | None = None,
         **ctx_kwargs,
     ):
         """
@@ -315,6 +328,10 @@ class SimpleContext:
             HTTP request timeout in seconds.  If None, fall back to the object default.
             If a 2-tuple, the first value pertains to the initial connection time,
             and the second value pertains to the total transmission and response.
+        json_options : dict
+            Keyword options to bind to the JSON codec used to decode responses, with
+            optional ``encode`` and ``decode`` entries.  If None, fall back to the
+            object default.  See ``tuber.codecs.Codec.with_options()``.
         ctx_kwargs :
             Any remaining keyword arguments are added as additional keywords to any
             method call made by this context.
@@ -331,6 +348,14 @@ class SimpleContext:
                 if accept_type not in AcceptTypes.keys():
                     raise ValueError(f"Unsupported accept type: {accept_type}")
             self.accept_types = accept_types
+        if json_options is None:
+            json_options = self.obj._json_options
+        if json_options:
+            self.json_codec = Codecs["json"].with_options(**json_options)
+            self.accept_handlers = {**AcceptTypes, "application/json": make_json_decoder(self.json_codec)}
+        else:
+            self.json_codec = Codecs["json"]
+            self.accept_handlers = AcceptTypes
         if convert_json is None:
             convert_json = self.obj._convert_json
         self.convert_json = True if convert_json is None else convert_json
@@ -342,6 +367,16 @@ class SimpleContext:
         self.timeout = timeout
         self.ctx_kwargs = ctx_kwargs
         self.container = {}
+
+    def _encode_request(self, calls):
+        """
+        Serialize a request body, applying any options bound to the JSON codec.
+
+        Text output is encoded explicitly, since the underlying HTTP libraries do
+        not agree on how to encode a string body.
+        """
+        data = self.json_codec.encode(calls)
+        return data.encode("utf-8") if isinstance(data, str) else data
 
     def __enter__(self):
         return self
@@ -416,8 +451,10 @@ class SimpleContext:
 
         cs = self.obj._tuber_session
 
-        # Declare the media types we want to allow getting back
-        headers = {"Accept": ", ".join(self.accept_types)}
+        # Declare the media types we want to allow getting back.  The request body is
+        # serialized here rather than via the session's own JSON support, so that any
+        # options bound to the codec are applied.
+        headers = {"Accept": ", ".join(self.accept_types), "Content-Type": "application/json"}
         if return_exceptions is None:
             return_exceptions = self.return_exceptions
         if return_exceptions:
@@ -430,7 +467,7 @@ class SimpleContext:
 
         # Create a HTTP request to complete the call.
         # Returns a Future whose result has been processed by the response hook.
-        post_kwargs = dict(json=calls, headers=headers, hooks={"response": hook})
+        post_kwargs = dict(data=self._encode_request(calls), headers=headers, hooks={"response": hook})
         if self.timeout is not None:
             post_kwargs["timeout"] = self.timeout
         return cs.post(self.uri, **post_kwargs)
@@ -580,12 +617,12 @@ class SimpleContext:
             content_type = resp.headers["Content-Type"]
             # Check that the resulting media type is one which can actually be handled;
             # this is slightly more liberal than checking that it is really among those we declared
-            if content_type not in AcceptTypes:
+            if content_type not in self.accept_handlers:
                 # cancel any pending futures
                 for f in futures:
                     f.cancel()
                 raise TuberError(f"Unexpected response content type: {content_type}")
-            json_out = AcceptTypes[content_type](raw_out, resp.apparent_encoding, convert=convert_json)
+            json_out = self.accept_handlers[content_type](raw_out, resp.apparent_encoding, convert=convert_json)
 
         response.tuber_results = self._parse_json(json_out, futures, convert_json, return_exceptions)
         return response.tuber_results
@@ -766,14 +803,17 @@ class Context(SimpleContext):
         if return_exceptions is None:
             return_exceptions = self.return_exceptions
 
-        # Declare the media types we want to allow getting back
-        headers = {"Accept": ", ".join(self.accept_types)}
+        # Declare the media types we want to allow getting back.  The request body is
+        # serialized here rather than via the session's json_serialize, so that any
+        # options bound to the codec are applied without having to maintain a separate
+        # session per set of options.
+        headers = {"Accept": ", ".join(self.accept_types), "Content-Type": "application/json"}
         if return_exceptions:
             headers["X-Tuber-Options"] = "continue-on-error"
         # Create a HTTP request to complete the call. This is a coroutine,
         # so we queue the call and then suspend execution (via 'yield')
         # until it's complete.
-        post_kwargs = dict(json=calls, headers=headers)
+        post_kwargs = dict(data=self._encode_request(calls), headers=headers)
         if self.timeout is not None:
             opts = {}
             if not isinstance(self.timeout, tuple):
@@ -798,12 +838,12 @@ class Context(SimpleContext):
             content_type = resp.content_type
             # Check that the resulting media type is one which can actually be handled;
             # this is slightly more liberal than checking that it is really among those we declared
-            if content_type not in AcceptTypes:
+            if content_type not in self.accept_handlers:
                 # cancel any pending futures
                 for f in futures:
                     f.cancel()
                 raise TuberError("Unexpected response content type: " + content_type)
-            json_out = AcceptTypes[content_type](raw_out, resp.charset, convert=convert_json)
+            json_out = self.accept_handlers[content_type](raw_out, resp.charset, convert=convert_json)
 
         return self._parse_json(json_out, futures, convert_json, return_exceptions)
 
@@ -830,6 +870,7 @@ class SimpleTuberObject:
         convert_json: bool | None = None,
         return_exceptions: bool | None = None,
         timeout: float | None = None,
+        json_options: dict | None = None,
         parent: "SimpleTuberObject" | None = None,
     ):
         """
@@ -858,6 +899,10 @@ class SimpleTuberObject:
             This default may be overridden in the context construction.
             If a 2-tuple, the first value pertains to the initial connection time,
             and the second value pertains to the total transmission and response.
+        json_options : dict
+            Keyword options to bind to the JSON codec used to decode responses, with
+            optional ``encode`` and ``decode`` entries.  This default may be overridden
+            in the context construction.  See ``tuber.codecs.Codec.with_options()``.
         parent: SimpleTuberObject
             If given, assume this object is an attribute of this parent object.
         """
@@ -871,12 +916,14 @@ class SimpleTuberObject:
             self._convert_json = convert_json
             self._return_exceptions = return_exceptions
             self._timeout = timeout
+            self._json_options = json_options
         else:
             self._tuber_host = parent._tuber_host
             self._accept_types = parent._accept_types
             self._convert_json = parent._convert_json
             self._return_exceptions = parent._return_exceptions
             self._timeout = parent._timeout
+            self._json_options = parent._json_options
 
     @property
     def is_container(self):

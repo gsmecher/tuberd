@@ -87,11 +87,9 @@ def tuberd(request, pytestconfig):
         # tuberd execution environment as well - in which case, we should skip
         # the test.
         pytest.importorskip("simplejson")
-        os.environ.pop("TUBER_DISABLE_SIMPLEJSON", None)
-    else:
-        # Force stdlib json so this test run is not silently using simplejson.
-        # The subprocess inherits the environment, so this also applies to tuberd.
-        os.environ["TUBER_DISABLE_SIMPLEJSON"] = "1"
+        # Unlike the standard library, simplejson rejects non-finite floats unless
+        # allow_nan is bound, so set it here to keep the wire format consistent.
+        argv.extend(["--json", "simplejson", "--json-option", "allow_nan=true"])
 
     s = subprocess.Popen(argv)
 
