@@ -39,10 +39,8 @@ static void run_server(py::object handler, int port=80, py::object webroot=py::n
 
 	/* A single long-lived keep-alive connection with a single client is
 	 * the expected "hot path": don't cap the number of requests it can
-	 * carry, and use a longer timeout than the default (5s). Each live
-	 * connection occupies a worker thread; the pool grows under load. */
+	 * carry. The idle timeout is left at cpp-httplib's default (5s). */
 	svr->set_keep_alive_max_count(std::numeric_limits<size_t>::max());
-	svr->set_keep_alive_timeout(180);
 	svr->set_default_file_mimetype(MIME_DEFAULT);
 
 	/* It's Always TCP_NODELAY. Every damn time.
