@@ -242,52 +242,22 @@ class Codec:
 
         return self.decode(response_data, **({"object_hook": hook} if hook else {}))
 
-    def with_options(self, *options, decode=None, encode=None):
+    def with_options(self, decode=None, encode=None):
         """
         Return a copy of this codec with additional default options bound to it.
 
         Arguments
         ---------
-        options : str
-            Options as ``KEY=VALUE`` strings, in the form accepted on the tuberd
-            command line.  Keys may be prefixed with ``encode:`` or ``decode:`` to
-            bind the option in a single direction; unprefixed options are bound to
-            both.  Values are parsed as JSON where possible and left as plain
-            strings otherwise, so that ``allow_nan=true`` yields ``True`` and
-            ``indent=2`` yields ``2``.
         decode : dict
             Keyword options to supply to the decode function.
         encode : dict
             Keyword options to supply to the encode function.
         """
-        parsed = {"decode": dict(decode or {}), "encode": dict(encode or {})}
-
-        for option in options:
-            key, sep, value = option.partition("=")
-            if not sep:
-                raise ValueError(f"Invalid codec option {option!r}, expected KEY=VALUE")
-
-            target, tsep, name = key.partition(":")
-            if tsep:
-                if target not in parsed:
-                    raise ValueError(f"Invalid codec option target {target!r} in {option!r}")
-                targets = [target]
-            else:
-                name, targets = key, list(parsed)
-
-            try:
-                value = json.loads(value)
-            except ValueError:
-                pass
-
-            for target in targets:
-                parsed[target][name] = value
-
         return Codec(
             self._decode,
             self._encode,
-            {**self.decode_options, **parsed["decode"]},
-            {**self.encode_options, **parsed["encode"]},
+            {**self.decode_options, **(decode or {})},
+            {**self.encode_options, **(encode or {})},
             self._object_hook,
             self._binary,
         )

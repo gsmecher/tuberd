@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 
-from collections.abc import Mapping
+import argparse
 import inspect
+import json
 import os
 import warnings
 import functools
@@ -378,10 +379,9 @@ class RequestHandler:
             Default encoding format to assume for requests and responses.
         validate : bool
             If True, validate incoming and outgoing packets with jsonschema.
-        json_options : dict or list of str
-            Keyword options to bind to the JSON codec, either as a dictionary with
-            optional ``encode`` and ``decode`` entries, or as a list of
-            ``KEY=VALUE`` strings.  See ``tuber.codecs.Codec.with_options()``.
+        json_options : dict
+            Keyword options to bind to the JSON codec, with optional ``encode``
+            and ``decode`` entries.  See ``tuber.codecs.Codec.with_options()``.
         """
         # ensure registry is a dictionary
         assert isinstance(registry, (dict, TuberRegistry)), "Invalid registry"
@@ -397,12 +397,7 @@ class RequestHandler:
         except Exception as e:
             raise RuntimeError(f"Unable to import {json_module} codec ({str(e)})")
 
-        if isinstance(json_options, Mapping):
-            codec = codec.with_options(**json_options)
-        elif json_options:
-            codec = codec.with_options(*json_options)
-
-        self.codecs["application/json"] = codec
+        self.codecs["application/json"] = codec.with_options(**json_options) if json_options else codec
 
         try:
             self.codecs["application/cbor"] = Codecs["cbor"]
@@ -675,10 +670,9 @@ def run(registry, json_module="json", port=80, webroot=None, max_age=3600, valid
         Maximum cache residency for static (file) assets
     validate : bool
         If True, validate incoming and outgoing data packets using jsonschema
-    json_options : dict or list of str
-        Keyword options to bind to the JSON codec, either as a dictionary with
-        optional ``encode`` and ``decode`` entries, or as a list of ``KEY=VALUE``
-        strings.  See ``tuber.codecs.Codec.with_options()``.
+    json_options : dict
+        Keyword options to bind to the JSON codec, with optional ``encode`` and
+        ``decode`` entries.  See ``tuber.codecs.Codec.with_options()``.
     """
     # setup environment
     os.environ["TUBER_SERVER"] = "1"
@@ -711,6 +705,46 @@ def load_registry(filename):
     return mod.registry
 
 
+class CodecOption(argparse.Action):
+    """
+    Collect ``KEY=VALUE`` command line options into a codec options dictionary.
+
+    Keys may be prefixed with ``encode:`` or ``decode:`` to bind the option in a
+    single direction; unprefixed options are bound to both.  Values are parsed as
+    JSON where possible and left as plain strings otherwise, so that
+    ``allow_nan=true`` yields ``True`` and ``indent=2`` yields ``2``.
+
+    The result is accumulated across repeated arguments into a dictionary suitable
+    for ``tuber.codecs.Codec.with_options()``.
+    """
+
+    def __call__(self, parser, namespace, value, option_string=None):
+        options = getattr(namespace, self.dest, None)
+        if options is None:
+            options = {"decode": {}, "encode": {}}
+            setattr(namespace, self.dest, options)
+
+        key, sep, val = value.partition("=")
+        if not sep:
+            parser.error(f"argument {option_string}: expected KEY=VALUE, got {value!r}")
+
+        target, tsep, name = key.partition(":")
+        if tsep:
+            if target not in options:
+                parser.error(f"argument {option_string}: invalid target {target!r} in {value!r}")
+            targets = [target]
+        else:
+            name, targets = key, list(options)
+
+        try:
+            val = json.loads(val)
+        except ValueError:
+            pass
+
+        for target in targets:
+            options[target][name] = val
+
+
 def main(registry=None):
     """
     Server entry point.
@@ -719,9 +753,7 @@ def main(registry=None):
     ``--registry`` command-line argument to provide a path to a registry file.
     """
 
-    import argparse as ap
-
-    P = ap.ArgumentParser(description="Tuber server")
+    P = argparse.ArgumentParser(description="Tuber server")
     if registry is None:
         P.add_argument(
             "-r",
@@ -738,8 +770,7 @@ def main(registry=None):
     )
     P.add_argument(
         "--json-option",
-        action="append",
-        default=[],
+        action=CodecOption,
         dest="json_options",
         metavar="[encode:|decode:]KEY=VALUE",
         help="Keyword option to supply to the JSON codec, e.g. allow_nan=true.  May be "

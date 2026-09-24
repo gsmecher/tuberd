@@ -327,50 +327,66 @@ def test_neginf_value(tuber_call):
 
 
 def test_codec_with_options():
-    """Codec options may be given as KEY=VALUE strings or as keyword dictionaries"""
+    """Codec options are bound to a copy, leaving the registered codec untouched"""
 
     from tuber.codecs import Codecs
 
     codec = Codecs["json"]
+    bound = codec.with_options(decode={"parse_int": float}, encode={"indent": 2})
 
-    # values are parsed as JSON where possible, and left as strings otherwise
-    encode = codec.with_options("allow_nan=true", "indent=2", "separators=abc").encode_options
-    assert encode["allow_nan"] is True
-    assert encode["indent"] == 2
-    assert encode["separators"] == "abc"
+    assert bound.decode_options["parse_int"] is float
+    assert bound.encode_options["indent"] == 2
+    assert "parse_int" not in codec.decode_options
+    assert "indent" not in codec.encode_options
 
-    # the string and keyword forms are equivalent, and may be mixed
-    strings = codec.with_options("allow_nan=true", "encode:indent=2")
-    kwargs = codec.with_options(decode={"allow_nan": True}, encode={"allow_nan": True, "indent": 2})
-    mixed = codec.with_options("allow_nan=true", encode={"indent": 2})
-    assert strings.decode_options == kwargs.decode_options == mixed.decode_options
-    assert strings.encode_options == kwargs.encode_options == mixed.encode_options
+    # options accumulate across successive copies
+    assert bound.with_options(encode={"sort_keys": True}).encode_options == {"indent": 2, "sort_keys": True}
 
-    # options are bound to a copy, leaving the registered codec untouched
-    assert "allow_nan" not in codec.encode_options
 
+def test_cli_json_options():
+    """--json-option arguments are collected into a codec options dictionary"""
+
+    import argparse
+    from tuber.server import CodecOption
+
+    P = argparse.ArgumentParser(prog="tuberd")
+    P.add_argument("--json-option", action=CodecOption, dest="json_options")
+
+    assert P.parse_args([]).json_options is None
+
+    # unprefixed options are bound to both directions, prefixed ones to one, and
+    # values are parsed as JSON where possible and left as strings otherwise
+    args = P.parse_args(
+        ["--json-option", "allow_nan=true", "--json-option", "encode:indent=2", "--json-option", "decode:x=abc"]
+    )
+    assert args.json_options == {
+        "decode": {"allow_nan": True, "x": "abc"},
+        "encode": {"allow_nan": True, "indent": 2},
+    }
+
+    # each parse accumulates into its own dictionary
+    assert P.parse_args(["--json-option", "a=1"]).json_options["encode"] == {"a": 1}
+
+    # malformed arguments are reported by argparse, which exits rather than raising
     for bad in ["nonsense", "bogus:x=1"]:
-        with pytest.raises(ValueError):
-            codec.with_options(bad)
+        with pytest.raises(SystemExit):
+            P.parse_args(["--json-option", bad])
 
 
-def test_server_json_options_forms():
-    """The server accepts codec options in either form"""
+def test_server_json_options():
+    """The server binds codec options supplied as a dictionary"""
 
     pytest.importorskip("simplejson")
     from tuber.server import RequestHandler
 
-    def options(json_options):
-        handler = RequestHandler({}, json_module="simplejson", json_options=json_options)
-        codec = handler.codecs["application/json"]
-        return codec.decode_options, codec.encode_options
-
-    decode, encode = options(["allow_nan=true", "encode:indent=2"])
-    assert decode == {"allow_nan": True}
-    assert encode["allow_nan"] is True and encode["indent"] == 2
-
-    # the equivalent dictionary binds the same options
-    assert options({"decode": {"allow_nan": True}, "encode": {"allow_nan": True, "indent": 2}}) == (decode, encode)
+    handler = RequestHandler(
+        {},
+        json_module="simplejson",
+        json_options={"decode": {"allow_nan": True}, "encode": {"allow_nan": True, "indent": 2}},
+    )
+    codec = handler.codecs["application/json"]
+    assert codec.decode_options == {"allow_nan": True}
+    assert codec.encode_options["allow_nan"] is True and codec.encode_options["indent"] == 2
 
 
 #
