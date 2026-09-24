@@ -792,9 +792,7 @@ class Context(SimpleContext):
                 Resolver = aiohttp.resolver.ThreadedResolver
 
             # Monkey-patch tuber session memory handling with the running event loop
-            loop._tuber_aiohttp_session = aiohttp.ClientSession(
-                json_serialize=Codecs["json"].encode, connector=aiohttp.TCPConnector(resolver=Resolver())
-            )
+            loop._tuber_aiohttp_session = aiohttp.ClientSession(connector=aiohttp.TCPConnector(resolver=Resolver()))
 
             # Ensure that ClientSession.close() is called when the loop is
             # closed.  ClientSession.__del__ does not close the session, so it
@@ -819,9 +817,9 @@ class Context(SimpleContext):
             return_exceptions = self.return_exceptions
 
         # Declare the media types we want to allow getting back.  The request body is
-        # serialized here rather than via the session's json_serialize, so that any
-        # options bound to the codec are applied without having to maintain a separate
-        # session per set of options.
+        # serialized by the context rather than by the session, so that options bound
+        # to the codec are applied without having to maintain a separate session per
+        # set of options.
         headers = {"Accept": ", ".join(self.accept_types), "Content-Type": "application/json"}
         if return_exceptions:
             headers["X-Tuber-Options"] = "continue-on-error"
