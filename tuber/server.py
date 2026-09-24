@@ -432,7 +432,7 @@ class RequestHandler:
         """
         if fmt is None:
             fmt = self.default_format
-        return fmt, self.codecs[fmt].assemble_list([self.encode(d, fmt)[1] for d in data])
+        return fmt, self.codecs[fmt].join_encoded([self.encode(d, fmt)[1] for d in data])
 
     def decode(self, data, fmt=None):
         """
