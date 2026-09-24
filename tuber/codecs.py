@@ -39,8 +39,10 @@ class TuberResult(types.SimpleNamespace):
     pass
 
 
-def wrap_bytes_for_json(obj):
+def json_default(obj):
     """
+    Fall-back hook for objects the JSON encoders cannot serialize natively.
+
     JSON cannot (natively) encode bytes, so we provide a simple encoding for them.
     This allows uniformity when using either JSON or binary formats (CBOR, etc.)
     which do have native binary support. The JSON encoding is not meant to be
@@ -268,7 +270,7 @@ def decode_json(response_data, **kwargs):
 
 
 def encode_json(obj, **kwargs):
-    return json.dumps(obj, default=wrap_bytes_for_json, **kwargs)
+    return json.dumps(obj, default=json_default, **kwargs)
 
 
 Codecs["json"] = Codec(decode=decode_json, encode=encode_json)
@@ -284,7 +286,7 @@ if have_simplejson:
         return simplejson.loads(response_data, **kwargs)
 
     def encode_simplejson(obj, **kwargs):
-        return simplejson.dumps(obj, default=wrap_bytes_for_json, **kwargs)
+        return simplejson.dumps(obj, default=json_default, **kwargs)
 
     Codecs["simplejson"] = Codec(
         decode=decode_simplejson,
@@ -301,7 +303,7 @@ if have_orjson:
     def encode_orjson(obj, **kwargs):
         if have_numpy:
             kwargs["option"] = kwargs.get("option", 0) | orjson.OPT_SERIALIZE_NUMPY
-        return orjson.dumps(obj, default=wrap_bytes_for_json, **kwargs)
+        return orjson.dumps(obj, default=json_default, **kwargs)
 
     Codecs["orjson"] = Codec(decode=decode_orjson, encode=encode_orjson)
 
