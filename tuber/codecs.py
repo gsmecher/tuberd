@@ -268,6 +268,31 @@ class Codec:
 JsonCodecs = ("json", "simplejson", "orjson")
 
 
+def json_codec_options(json_module, allow_nan=True):
+    """
+    Build the keyword options implied by an ``allow_nan`` setting.
+
+    simplejson accepts ``allow_nan`` when decoding as well as encoding.  The
+    standard library reads non-finite floats unconditionally and accepts it only
+    when encoding, and orjson accepts it in neither direction - supplying it there
+    would raise.
+
+    Returns a dictionary suitable for ``Codec.with_options()``, or None if the
+    module takes no such option.  Raises ValueError for anything that is not a
+    JSON codec.
+    """
+    if json_module not in JsonCodecs:
+        raise ValueError(f"Unsupported JSON codec: {json_module}. Choose one of {', '.join(JsonCodecs)}")
+
+    allow_nan = {"allow_nan": allow_nan}
+
+    if json_module == "simplejson":
+        return {"decode": allow_nan, "encode": allow_nan}
+    if json_module == "json":
+        return {"encode": allow_nan}
+    return None
+
+
 def json_object_hook(convert):
     """
     Build the object hook used when decoding JSON responses.

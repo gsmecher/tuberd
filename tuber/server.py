@@ -9,7 +9,7 @@ import functools
 import sys
 import traceback
 
-from .codecs import Codecs
+from .codecs import Codecs, JsonCodecs, json_codec_options
 from . import schema
 
 __all__ = ["TuberRegistry", "TuberContainer", "TuberArray", "run", "main"]
@@ -725,6 +725,7 @@ def main(registry=None):
         "--json",
         default="json",
         dest="json_module",
+        choices=JsonCodecs,
         help="Python JSON module to use for serialization/deserialization",
     )
     P.add_argument(
@@ -748,16 +749,7 @@ def main(registry=None):
     )
     args = P.parse_args()
 
-    # simplejson accepts allow_nan when decoding as well as encoding; the standard
-    # library reads non-finite floats unconditionally and accepts it only when
-    # encoding.  orjson accepts it in neither direction, and is always strict.
-    allow_nan = {"allow_nan": vars(args).pop("allow_nan")}
-    if args.json_module == "simplejson":
-        args.json_options = {"decode": allow_nan, "encode": allow_nan}
-    elif args.json_module == "json":
-        args.json_options = {"encode": allow_nan}
-    else:
-        args.json_options = None
+    args.json_options = json_codec_options(args.json_module, vars(args).pop("allow_nan"))
 
     # setup environment
     os.environ["TUBER_SERVER"] = "1"

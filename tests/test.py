@@ -943,47 +943,27 @@ def test_tuberpy_fake_async(accept_types, tuberd_host):
 
 
 @pytest.mark.no_orjson
-def test_tuberpy_client_json_options(accept_types, tuberd_host):
-    """Options bound to the client JSON codec are applied when encoding requests"""
+@pytest.mark.parametrize("json_module", ["json", "simplejson"])
+def test_tuberpy_client_allow_nan(accept_types, tuberd_host, json_module):
+    """The client allows non-finite floats by default, and refuses them on request"""
 
-    # by default the client encodes non-finite floats, matching the standard library
-    s = tuber.resolve_simple(tuberd_host, "Types", accept_types)
+    pytest.importorskip(json_module)
+
+    s = tuber.resolve_simple(tuberd_host, "Types", accept_types, json_module=json_module)
     assert math.isnan(s.float_function(float("nan")))
 
-    # binding allow_nan=False makes the client refuse to encode them
-    s = tuber.resolve_simple(tuberd_host, "Types", accept_types, json_options={"encode": {"allow_nan": False}})
+    # allow_nan=False makes the client refuse to encode them
+    s = tuber.resolve_simple(tuberd_host, "Types", accept_types, json_module=json_module, allow_nan=False)
+    assert s.float_function(Types.FLOAT) == pytest.approx(Types.FLOAT)
     with pytest.raises(ValueError):
         s.float_function(float("nan"))
-
-
-@pytest.mark.no_orjson
-def test_tuberpy_client_json_module(accept_types, tuberd_host):
-    """The client can select which JSON implementation it uses"""
-
-    pytest.importorskip("simplejson")
-
-    # simplejson is strict about non-finite floats out of the box
-    s = tuber.resolve_simple(tuberd_host, "Types", accept_types, json_module="simplejson")
-    assert s.string_function() == Types.STRING
-    with pytest.raises(ValueError):
-        s.float_function(float("nan"))
-
-    # ...until the option is bound, at which point they round-trip
-    s = tuber.resolve_simple(
-        tuberd_host,
-        "Types",
-        accept_types,
-        json_module="simplejson",
-        json_options={"encode": {"allow_nan": True}, "decode": {"allow_nan": True}},
-    )
-    assert math.isnan(s.float_function(float("nan")))
 
 
 def test_tuberpy_client_json_module_unsupported(accept_types, tuberd_host):
     """Codecs that do not speak JSON are rejected"""
 
     for module in ["cbor", "does-not-exist"]:
-        with pytest.raises(ValueError, match="Unsupported client JSON codec"):
+        with pytest.raises(ValueError, match="Unsupported JSON codec"):
             tuber.resolve_simple(tuberd_host, "Types", accept_types, json_module=module)
 
 

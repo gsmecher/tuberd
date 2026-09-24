@@ -12,7 +12,7 @@ import inspect
 import functools
 
 from . import TuberError, TuberStateError, TuberRemoteError
-from .codecs import AcceptTypes, Codecs, JsonCodecs, TuberResult
+from .codecs import AcceptTypes, Codecs, TuberResult, json_codec_options
 
 __all__ = [
     "TuberObject",
@@ -30,7 +30,7 @@ async def resolve(
     return_exceptions: bool | None = None,
     timeout: float | None = None,
     json_module: str | None = None,
-    json_options: dict | None = None,
+    allow_nan: bool | None = None,
 ):
     """Create a local reference to a networked resource.
 
@@ -64,10 +64,10 @@ async def resolve(
         Python package used to encode requests and decode JSON responses, one of
         ``tuber.codecs.JsonCodecs``.  This default may be overridden in the
         context construction.
-    json_options : dict
-        Keyword options to bind to the JSON codec, with optional ``encode`` and
-        ``decode`` entries.  This default may be overridden in the context
-        construction.  See ``tuber.codecs.Codec.with_options()``.
+    allow_nan : bool
+        If False, refuse to encode or decode non-finite floats (NaN, Infinity).
+        Defaults to True.  Ignored by JSON modules that accept no such option.
+        This default may be overridden in the context construction.
 
     Returns
     -------
@@ -84,7 +84,7 @@ async def resolve(
         return_exceptions=return_exceptions,
         timeout=timeout,
         json_module=json_module,
-        json_options=json_options,
+        allow_nan=allow_nan,
     )
     await instance.tuber_resolve()
     return instance
@@ -98,7 +98,7 @@ def resolve_simple(
     return_exceptions: bool | None = None,
     timeout: float | None = None,
     json_module: str | None = None,
-    json_options: dict | None = None,
+    allow_nan: bool | None = None,
 ):
     """Create a local reference to a networked resource.
 
@@ -132,10 +132,10 @@ def resolve_simple(
         Python package used to encode requests and decode JSON responses, one of
         ``tuber.codecs.JsonCodecs``.  This default may be overridden in the
         context construction.
-    json_options : dict
-        Keyword options to bind to the JSON codec, with optional ``encode`` and
-        ``decode`` entries.  This default may be overridden in the context
-        construction.  See ``tuber.codecs.Codec.with_options()``.
+    allow_nan : bool
+        If False, refuse to encode or decode non-finite floats (NaN, Infinity).
+        Defaults to True.  Ignored by JSON modules that accept no such option.
+        This default may be overridden in the context construction.
 
     Returns
     -------
@@ -152,7 +152,7 @@ def resolve_simple(
         return_exceptions=return_exceptions,
         timeout=timeout,
         json_module=json_module,
-        json_options=json_options,
+        allow_nan=allow_nan,
     )
     instance.tuber_resolve()
     return instance
@@ -318,7 +318,7 @@ class SimpleContext:
         return_exceptions: bool | None = None,
         timeout: float | None = None,
         json_module: str | None = None,
-        json_options: dict | None = None,
+        allow_nan: bool | None = None,
         **ctx_kwargs,
     ):
         """
@@ -345,10 +345,9 @@ class SimpleContext:
             Python package used to encode requests and decode JSON responses, one of
             ``tuber.codecs.JsonCodecs``.  If None, fall back to the object
             default.
-        json_options : dict
-            Keyword options to bind to the JSON codec, with optional ``encode`` and
-            ``decode`` entries.  If None, fall back to the object default.  See
-            ``tuber.codecs.Codec.with_options()``.
+        allow_nan : bool
+            If False, refuse to encode or decode non-finite floats (NaN, Infinity).
+            If None, fall back to the object default, which is to allow them.
         ctx_kwargs :
             Any remaining keyword arguments are added as additional keywords to any
             method call made by this context.
@@ -369,20 +368,13 @@ class SimpleContext:
             json_module = self.obj._json_module
         if json_module is None:
             json_module = "json"
-        if json_module not in JsonCodecs:
-            raise ValueError(f"Unsupported client JSON codec: {json_module}. Choose one of {', '.join(JsonCodecs)}")
+        if allow_nan is None:
+            allow_nan = self.obj._allow_nan
+        options = json_codec_options(json_module, True if allow_nan is None else allow_nan)
         if json_module not in Codecs:
             raise ValueError(f"JSON codec {json_module} is not available")
-        if json_options is None:
-            json_options = self.obj._json_options
-        codec = Codecs[json_module]
-        if json_options:
-            codec = codec.with_options(**json_options)
-        self.json_codec = codec
-        if json_module == "json" and not json_options:
-            self.accept_handlers = AcceptTypes
-        else:
-            self.accept_handlers = {**AcceptTypes, "application/json": codec.decode_client}
+        self.json_codec = Codecs[json_module].with_options(**options) if options else Codecs[json_module]
+        self.accept_handlers = {**AcceptTypes, "application/json": self.json_codec.decode_client}
         if convert_json is None:
             convert_json = self.obj._convert_json
         self.convert_json = True if convert_json is None else convert_json
@@ -894,7 +886,7 @@ class SimpleTuberObject:
         return_exceptions: bool | None = None,
         timeout: float | None = None,
         json_module: str | None = None,
-        json_options: dict | None = None,
+        allow_nan: bool | None = None,
         parent: "SimpleTuberObject" | None = None,
     ):
         """
@@ -927,10 +919,10 @@ class SimpleTuberObject:
             Python package used to encode requests and decode JSON responses, one of
             ``tuber.codecs.JsonCodecs``.  This default may be overridden in the
             context construction.
-        json_options : dict
-            Keyword options to bind to the JSON codec, with optional ``encode`` and
-            ``decode`` entries.  This default may be overridden in the context
-            construction.  See ``tuber.codecs.Codec.with_options()``.
+        allow_nan : bool
+            If False, refuse to encode or decode non-finite floats (NaN, Infinity).
+            Defaults to True.  Ignored by JSON modules that accept no such option.
+            This default may be overridden in the context construction.
         parent: SimpleTuberObject
             If given, assume this object is an attribute of this parent object.
         """
@@ -945,7 +937,7 @@ class SimpleTuberObject:
             self._return_exceptions = return_exceptions
             self._timeout = timeout
             self._json_module = json_module
-            self._json_options = json_options
+            self._allow_nan = allow_nan
         else:
             self._tuber_host = parent._tuber_host
             self._accept_types = parent._accept_types
@@ -953,7 +945,7 @@ class SimpleTuberObject:
             self._return_exceptions = parent._return_exceptions
             self._timeout = parent._timeout
             self._json_module = parent._json_module
-            self._json_options = parent._json_options
+            self._allow_nan = parent._allow_nan
 
         # A root object owns a requests session (connection pool) for its
         # whole tree of attributes and container items, in the same way that
