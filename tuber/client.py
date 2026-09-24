@@ -12,7 +12,7 @@ import inspect
 import functools
 
 from . import TuberError, TuberStateError, TuberRemoteError
-from .codecs import AcceptTypes, Codecs, JsonClientCodecs, TuberResult, make_json_decoder
+from .codecs import AcceptTypes, Codecs, JsonClientCodecs, TuberResult
 
 __all__ = [
     "TuberObject",
@@ -384,7 +384,7 @@ class SimpleContext:
         if json_module == "json" and not json_options:
             self.accept_handlers = AcceptTypes
         else:
-            self.accept_handlers = {**AcceptTypes, "application/json": make_json_decoder(codec)}
+            self.accept_handlers = {**AcceptTypes, "application/json": codec.decode_client}
         if convert_json is None:
             convert_json = self.obj._convert_json
         self.convert_json = True if convert_json is None else convert_json

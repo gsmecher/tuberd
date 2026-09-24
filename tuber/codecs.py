@@ -197,17 +197,29 @@ class Codec:
     precedence over them.
     """
 
-    def __init__(self, decode, encode, decode_options=None, encode_options=None):
+    def __init__(self, decode, encode, decode_options=None, encode_options=None, decode_client=None):
         self._decode = decode
         self._encode = encode
         self.decode_options = dict(decode_options or {})
         self.encode_options = dict(encode_options or {})
+        self._decode_client = decode_client or decode_json_response
 
     def decode(self, data, **kwargs):
         return self._decode(data, **{**self.decode_options, **kwargs})
 
     def encode(self, obj, **kwargs):
         return self._encode(obj, **{**self.encode_options, **kwargs})
+
+    def decode_client(self, response_data, encoding, convert=True):
+        """
+        Decode a response body received by the client.
+
+        Responses are decoded into ``TuberResult`` namespaces when ``convert`` is
+        set, and encoded bytes are unwrapped.  Defaults to the JSON handling in
+        ``decode_json_response()``; codecs whose responses need different
+        treatment supply their own via the ``decode_client`` constructor argument.
+        """
+        return self._decode_client(self, response_data, encoding, convert)
 
     def with_options(self, *options, decode=None, encode=None):
         """
@@ -255,7 +267,36 @@ class Codec:
             self._encode,
             {**self.decode_options, **parsed["decode"]},
             {**self.encode_options, **parsed["encode"]},
+            self._decode_client,
         )
+
+
+# Codec names that can drive the client-side JSON decoder.  That decoder relies on
+# object_hook to rebuild TuberResult objects and to unwrap encoded bytes, which
+# orjson does not support - orjson.loads() accepts no keyword arguments at all.
+JsonClientCodecs = ("json", "simplejson")
+
+
+def decode_json_response(codec, response_data, encoding, convert=True):
+    """
+    Client-side decoder for JSON response bodies, and the default used by
+    ``Codec.decode_client()``.
+
+    The codec's decode function must accept an ``object_hook`` keyword; see
+    ``JsonClientCodecs`` for the codecs that qualify.
+    """
+    if encoding is None:  # guess the typical default if unspecified
+        encoding = "utf-8"
+
+    def ohook(obj):
+        if isinstance(obj, Mapping) and "bytes" in obj and (len(obj) == 1 or (len(obj) == 2 and "subtype" in obj)):
+            try:
+                return bytes(obj["bytes"])
+            except ValueError:
+                pass
+        return TuberResult(**obj) if convert else obj
+
+    return codec.decode(response_data.decode(encoding), object_hook=ohook)
 
 
 def decode_json(response_data, **kwargs):
@@ -301,40 +342,7 @@ if have_orjson:
     Codecs["orjson"] = Codec(decode=decode_orjson, encode=encode_orjson)
 
 
-# Codec names that can drive the client-side JSON decoder.  That decoder relies on
-# object_hook to rebuild TuberResult objects and to unwrap encoded bytes, which
-# orjson does not support - orjson.loads() accepts no keyword arguments at all.
-JsonClientCodecs = ("json", "simplejson")
-
-
-def make_json_decoder(codec):
-    """
-    Build a client-side decode function for JSON responses from the given codec.
-
-    The codec's decode function must accept an ``object_hook`` keyword; see
-    ``JsonClientCodecs`` for the codecs that qualify.
-    """
-
-    def decode_json_client(response_data, encoding, convert=True):
-        if encoding is None:  # guess the typical default if unspecified
-            encoding = "utf-8"
-
-        def ohook(obj):
-            if isinstance(obj, Mapping) and "bytes" in obj and (len(obj) == 1 or (len(obj) == 2 and "subtype" in obj)):
-                try:
-                    return bytes(obj["bytes"])
-                except ValueError:
-                    pass
-            return TuberResult(**obj) if convert else obj
-
-        return codec.decode(response_data.decode(encoding), object_hook=ohook)
-
-    return decode_json_client
-
-
-decode_json_client = make_json_decoder(Codecs["json"])
-
-AcceptTypes["application/json"] = decode_json_client
+AcceptTypes["application/json"] = Codecs["json"].decode_client
 
 
 # Use cbor2 to handle CBOR, if available
@@ -354,11 +362,18 @@ if have_cbor:
     def encode_cbor(obj, **kwargs):
         return cbor2.dumps(obj, default=cbor_augment_encode, **kwargs)
 
-    Codecs["cbor"] = Codec(decode=decode_cbor, encode=encode_cbor)
+    def decode_cbor_response(codec, response_data, encoding, convert=True):
+        """
+        Client-side decoder for CBOR response bodies.
 
-    def decode_cbor_client(response_data, encoding, convert=True):
+        CBOR is binary, so unlike JSON there is no character encoding to apply,
+        and bytes need no unwrapping - the object hook is only required in order
+        to build TuberResult namespaces.
+        """
         if not convert:
-            return decode_cbor(response_data)
-        return decode_cbor(response_data, object_hook=_obj_hook_convert)
+            return codec.decode(response_data)
+        return codec.decode(response_data, object_hook=_obj_hook_convert)
 
-    AcceptTypes["application/cbor"] = decode_cbor_client
+    Codecs["cbor"] = Codec(decode=decode_cbor, encode=encode_cbor, decode_client=decode_cbor_response)
+
+    AcceptTypes["application/cbor"] = Codecs["cbor"].decode_client
