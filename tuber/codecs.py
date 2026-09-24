@@ -47,11 +47,26 @@ def wrap_bytes_for_json(obj):
     especially efficient, since anyone wanting seriously move around significant
     amounts of binary data should use another format, but it provides a
     consistent, readable/debuggable, fall-back.
+
+    Any other unsupported object is rejected here.  This hook is only called for
+    objects the encoder cannot serialize natively, and must either return a
+    substitute or raise; returning the object unchanged makes the encoder recurse
+    on it, reporting an unhelpful "Circular reference detected" instead.
     """
     if isinstance(obj, bytes):
         data = [int(v) for v in obj]
         return {"bytes": data}
-    return obj
+
+    # This message is handed back to the client, so keep the detail bounded, and
+    # tolerate objects whose repr() raises.
+    try:
+        detail = repr(obj)
+    except Exception:
+        detail = "<unrepresentable>"
+    if len(detail) > 80:
+        detail = detail[:77] + "..."
+
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable: {detail}")
 
 
 def cbor_encode_ndarray(enc, arr):
