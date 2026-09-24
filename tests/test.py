@@ -963,13 +963,27 @@ def test_tuberpy_client_json_module(accept_types, tuberd_host):
 
 
 def test_tuberpy_client_json_module_unsupported(accept_types, tuberd_host):
-    """Codecs that cannot drive the client decoder are rejected up front"""
+    """Codecs that do not speak JSON are rejected"""
 
-    # orjson.loads() takes no keyword arguments, so it cannot supply the object_hook
-    # that the client decoder needs to rebuild TuberResults and unwrap bytes
-    for module in ["orjson", "does-not-exist"]:
+    for module in ["cbor", "does-not-exist"]:
         with pytest.raises(ValueError, match="Unsupported client JSON codec"):
             tuber.resolve_simple(tuberd_host, "Types", accept_types, json_module=module)
+
+
+def test_tuberpy_client_orjson(tuberd_host):
+    """orjson decodes client responses, but cannot build TuberResult namespaces"""
+
+    pytest.importorskip("orjson")
+    accept_types = ["application/json"]
+
+    s = tuber.resolve_simple(tuberd_host, "Types", accept_types, json_module="orjson", convert_json=False)
+    assert s.string_function() == Types.STRING
+
+    # orjson.loads() takes no keyword arguments, so it cannot accept the object
+    # hook that conversion requires
+    s = tuber.resolve_simple(tuberd_host, "Types", accept_types, json_module="orjson")
+    with pytest.raises(TypeError, match="cannot convert responses"):
+        s.string_function()
 
 
 @pytest.mark.parametrize("return_exceptions", [True, False])

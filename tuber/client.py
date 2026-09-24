@@ -12,7 +12,7 @@ import inspect
 import functools
 
 from . import TuberError, TuberStateError, TuberRemoteError
-from .codecs import AcceptTypes, Codecs, JsonClientCodecs, TuberResult
+from .codecs import AcceptTypes, Codecs, JsonCodecs, TuberResult
 
 __all__ = [
     "TuberObject",
@@ -62,7 +62,7 @@ async def resolve(
         and the second value pertains to the total transmission and response.
     json_module : str
         Python package used to encode requests and decode JSON responses, one of
-        ``tuber.codecs.JsonClientCodecs``.  This default may be overridden in the
+        ``tuber.codecs.JsonCodecs``.  This default may be overridden in the
         context construction.
     json_options : dict
         Keyword options to bind to the JSON codec, with optional ``encode`` and
@@ -130,7 +130,7 @@ def resolve_simple(
         and the second value pertains to the total transmission and response.
     json_module : str
         Python package used to encode requests and decode JSON responses, one of
-        ``tuber.codecs.JsonClientCodecs``.  This default may be overridden in the
+        ``tuber.codecs.JsonCodecs``.  This default may be overridden in the
         context construction.
     json_options : dict
         Keyword options to bind to the JSON codec, with optional ``encode`` and
@@ -343,7 +343,7 @@ class SimpleContext:
             and the second value pertains to the total transmission and response.
         json_module : str
             Python package used to encode requests and decode JSON responses, one of
-            ``tuber.codecs.JsonClientCodecs``.  If None, fall back to the object
+            ``tuber.codecs.JsonCodecs``.  If None, fall back to the object
             default.
         json_options : dict
             Keyword options to bind to the JSON codec, with optional ``encode`` and
@@ -369,10 +369,8 @@ class SimpleContext:
             json_module = self.obj._json_module
         if json_module is None:
             json_module = "json"
-        if json_module not in JsonClientCodecs:
-            raise ValueError(
-                f"Unsupported client JSON codec: {json_module}. Choose one of {', '.join(JsonClientCodecs)}"
-            )
+        if json_module not in JsonCodecs:
+            raise ValueError(f"Unsupported client JSON codec: {json_module}. Choose one of {', '.join(JsonCodecs)}")
         if json_module not in Codecs:
             raise ValueError(f"JSON codec {json_module} is not available")
         if json_options is None:
@@ -927,7 +925,7 @@ class SimpleTuberObject:
             and the second value pertains to the total transmission and response.
         json_module : str
             Python package used to encode requests and decode JSON responses, one of
-            ``tuber.codecs.JsonClientCodecs``.  This default may be overridden in the
+            ``tuber.codecs.JsonCodecs``.  This default may be overridden in the
             context construction.
         json_options : dict
             Keyword options to bind to the JSON codec, with optional ``encode`` and
