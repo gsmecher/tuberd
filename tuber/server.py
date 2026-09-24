@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 
+from collections.abc import Mapping
 import inspect
 import os
 import warnings
@@ -8,7 +9,7 @@ import functools
 import sys
 import traceback
 
-from .codecs import Codecs, parse_codec_options
+from .codecs import Codecs
 from . import schema
 
 __all__ = ["TuberRegistry", "TuberContainer", "TuberArray", "run", "main"]
@@ -377,9 +378,10 @@ class RequestHandler:
             Default encoding format to assume for requests and responses.
         validate : bool
             If True, validate incoming and outgoing packets with jsonschema.
-        json_options : dict
-            Keyword options to bind to the JSON codec, with optional ``encode``
-            and ``decode`` entries.  See ``tuber.codecs.Codec.with_options()``.
+        json_options : dict or list of str
+            Keyword options to bind to the JSON codec, either as a dictionary with
+            optional ``encode`` and ``decode`` entries, or as a list of
+            ``KEY=VALUE`` strings.  See ``tuber.codecs.Codec.with_options()``.
         """
         # ensure registry is a dictionary
         assert isinstance(registry, (dict, TuberRegistry)), "Invalid registry"
@@ -395,7 +397,12 @@ class RequestHandler:
         except Exception as e:
             raise RuntimeError(f"Unable to import {json_module} codec ({str(e)})")
 
-        self.codecs["application/json"] = codec.with_options(**json_options) if json_options else codec
+        if isinstance(json_options, Mapping):
+            codec = codec.with_options(**json_options)
+        elif json_options:
+            codec = codec.with_options(*json_options)
+
+        self.codecs["application/json"] = codec
 
         try:
             self.codecs["application/cbor"] = Codecs["cbor"]
@@ -668,9 +675,10 @@ def run(registry, json_module="json", port=80, webroot=None, max_age=3600, valid
         Maximum cache residency for static (file) assets
     validate : bool
         If True, validate incoming and outgoing data packets using jsonschema
-    json_options : dict
-        Keyword options to bind to the JSON codec, with optional ``encode`` and
-        ``decode`` entries.  See ``tuber.codecs.Codec.with_options()``.
+    json_options : dict or list of str
+        Keyword options to bind to the JSON codec, either as a dictionary with
+        optional ``encode`` and ``decode`` entries, or as a list of ``KEY=VALUE``
+        strings.  See ``tuber.codecs.Codec.with_options()``.
     """
     # setup environment
     os.environ["TUBER_SERVER"] = "1"
@@ -751,7 +759,6 @@ def main(registry=None):
         "--validate", action="store_true", help="Validate incoming and outgoing data packets using jsonschema"
     )
     args = P.parse_args()
-    args.json_options = parse_codec_options(args.json_options)
 
     # setup environment
     os.environ["TUBER_SERVER"] = "1"

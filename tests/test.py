@@ -326,6 +326,53 @@ def test_neginf_value(tuber_call):
     assert tuber_call(object="Types", method="neginf_function") == Succeeded(float("-inf"))
 
 
+def test_codec_with_options():
+    """Codec options may be given as KEY=VALUE strings or as keyword dictionaries"""
+
+    from tuber.codecs import Codecs
+
+    codec = Codecs["json"]
+
+    # values are parsed as JSON where possible, and left as strings otherwise
+    encode = codec.with_options("allow_nan=true", "indent=2", "separators=abc").encode_options
+    assert encode["allow_nan"] is True
+    assert encode["indent"] == 2
+    assert encode["separators"] == "abc"
+
+    # the string and keyword forms are equivalent, and may be mixed
+    strings = codec.with_options("allow_nan=true", "encode:indent=2")
+    kwargs = codec.with_options(decode={"allow_nan": True}, encode={"allow_nan": True, "indent": 2})
+    mixed = codec.with_options("allow_nan=true", encode={"indent": 2})
+    assert strings.decode_options == kwargs.decode_options == mixed.decode_options
+    assert strings.encode_options == kwargs.encode_options == mixed.encode_options
+
+    # options are bound to a copy, leaving the registered codec untouched
+    assert "allow_nan" not in codec.encode_options
+
+    for bad in ["nonsense", "bogus:x=1"]:
+        with pytest.raises(ValueError):
+            codec.with_options(bad)
+
+
+def test_server_json_options_forms():
+    """The server accepts codec options in either form"""
+
+    pytest.importorskip("simplejson")
+    from tuber.server import RequestHandler
+
+    def options(json_options):
+        handler = RequestHandler({}, json_module="simplejson", json_options=json_options)
+        codec = handler.codecs["application/json"]
+        return codec.decode_options, codec.encode_options
+
+    decode, encode = options(["allow_nan=true", "encode:indent=2"])
+    assert decode == {"allow_nan": True}
+    assert encode["allow_nan"] is True and encode["indent"] == 2
+
+    # the equivalent dictionary binds the same options
+    assert options({"decode": {"allow_nan": True}, "encode": {"allow_nan": True, "indent": 2}}) == (decode, encode)
+
+
 #
 # pybind11 strenum tests. These tests are direct library imports and do not
 # exercise tuberd.
