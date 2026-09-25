@@ -17,7 +17,8 @@ if os.getenv("CMAKE_TEST"):
 else:
     from tuber.tests import test_module as tm
 
-from tuber.server import TuberContainer, TuberArray
+from tuber import codecs
+from tuber.server import RequestHandler, TuberContainer, TuberArray
 
 
 # REGISTRY DEFINITIONS
@@ -287,14 +288,148 @@ def test_double_vector(tuber_call):
 
 
 def test_unserializable(tuber_call):
-    # Errors differ between orjson, standard json, and CBOR
+    # Exception types differ between orjson, standard json, and CBOR, but every
+    # codec must identify the object that could not be encoded.
     message = tuber_call(object="Wrapper", method="unserializable")["error"]["message"]
-    assert (
-        message.startswith("ValueError:")
-        or message.startswith("CBOREncodeTypeError:")
-        or message.startswith("TypeError: default serializer")
-        or message.startswith("CBOREncodeTypeError: cannot serialize")
+    assert message.startswith(("TypeError:", "CBOREncodeTypeError:"))
+    assert "Wrapper" in message
+
+
+def test_batch_unserializable_isolated(tuber_call):
+    """An unserializable result in a batch becomes a per-item error; other results are unaffected."""
+    results = tuber_call(
+        json=[
+            {"object": "ObjectWithMethod", "method": "method"},
+            {"object": "Wrapper", "method": "unserializable"},
+            {"object": "ObjectWithMethod", "method": "method"},
+        ]
     )
+    assert len(results) == 3
+    assert results[0] == Succeeded("expected return value")
+    assert "error" in results[1]
+    assert results[2] == Succeeded("expected return value")
+
+
+#
+# Response encoding. These exercise RequestHandler.encode() and the codecs
+# directly, without going over the network.
+#
+# encode() takes either a single response packet or a list of them. A list is
+# encoded in one pass; only if that fails is each packet re-encoded on its own
+# so the error lands on the response that caused it, and the pieces joined.
+#
+
+CODEC_NAMES = list(codecs.Codecs)
+
+# These exercise the codecs directly and only need the library importable, so
+# the ids are prefixed to avoid matching the "orjson" marker that gates the
+# tests needing a server running the orjson fastpath.
+CODEC_IDS = [f"codec-{name}" for name in CODEC_NAMES]
+
+
+@pytest.fixture(params=CODEC_NAMES, ids=CODEC_IDS)
+def codec(request):
+    return codecs.Codecs[request.param]
+
+
+@pytest.fixture(params=CODEC_NAMES, ids=CODEC_IDS)
+def handler_fmt(request):
+    """A RequestHandler and response format for each available codec."""
+    if request.param == "cbor":
+        return RequestHandler({}), "application/cbor"
+    return RequestHandler({}, json_module=request.param), "application/json"
+
+
+class CountingCodec:
+    """Codec wrapper that records the packets passed to encode().
+
+    Forwards anything it doesn't intercept, so it depends only on the codec
+    interface rather than on how a codec object is built.
+    """
+
+    def __init__(self, codec, calls):
+        self._codec = codec
+        self._calls = calls
+
+    def encode(self, obj, **kwargs):
+        self._calls.append(obj)
+        return self._codec.encode(obj, **kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._codec, name)
+
+
+# Lengths bracket the CBOR definite-length array header widths: inline below
+# 24, one trailing byte at 24, two at 256.
+@pytest.mark.parametrize("length", [0, 1, 2, 23, 24, 255, 256])
+def test_codec_join_encoded(codec, length):
+    """Joining individually encoded packets matches encoding the list in one pass."""
+    items = [{"result": i} for i in range(length)]
+    joined = codec.join_encoded([codec.encode(item) for item in items])
+
+    assert codec.decode(joined) == items
+    assert codec.decode(joined) == codec.decode(codec.encode(items))
+
+
+def test_encode_single(handler_fmt):
+    handler, fmt = handler_fmt
+    rfmt, data = handler.encode({"result": "ok"}, fmt)
+
+    assert rfmt == fmt
+    assert handler.codecs[fmt].decode(data) == {"result": "ok"}
+
+
+def test_encode_single_unserializable(handler_fmt):
+    """A single unserializable packet becomes an error response."""
+    handler, fmt = handler_fmt
+    _, data = handler.encode({"result": tm.Wrapper()}, fmt)
+
+    assert "error" in handler.codecs[fmt].decode(data)
+
+
+def test_encode_batch(handler_fmt):
+    handler, fmt = handler_fmt
+    results = [{"result": 1}, {"result": 2}, {"result": 3}]
+    _, data = handler.encode(results, fmt)
+
+    assert handler.codecs[fmt].decode(data) == results
+
+
+def test_encode_batch_single_pass(handler_fmt):
+    """A batch that serializes cleanly is encoded in one pass, not per packet."""
+    handler, fmt = handler_fmt
+    encoded = []
+
+    handler.codecs[fmt] = CountingCodec(handler.codecs[fmt], encoded)
+    handler.encode([{"result": 1}, {"result": 2}, {"result": 3}], fmt)
+
+    assert len(encoded) == 1
+
+
+def test_encode_batch_isolates_unserializable(handler_fmt):
+    """One unserializable packet becomes an error without spoiling its siblings."""
+    handler, fmt = handler_fmt
+    _, data = handler.encode([{"result": "first"}, {"result": tm.Wrapper()}, {"result": "last"}], fmt)
+    decoded = handler.codecs[fmt].decode(data)
+
+    assert len(decoded) == 3
+    assert decoded[0] == {"result": "first"}
+    assert "error" in decoded[1]
+    assert decoded[2] == {"result": "last"}
+
+
+def test_encode_batch_isolates_invalid_packet(handler_fmt):
+    """A packet rejected by the response schema is replaced, leaving the rest intact."""
+    pytest.importorskip("jsonschema")
+    handler, fmt = handler_fmt
+    handler._validate = True
+
+    # "bogus" is refused by the response schema (additionalProperties: False)
+    _, data = handler.encode([{"result": "fine"}, {"result": 1, "bogus": 2}], fmt)
+    decoded = handler.codecs[fmt].decode(data)
+
+    assert decoded[0] == {"result": "fine"}
+    assert "error" in decoded[1]
 
 
 #
@@ -762,24 +897,23 @@ async def test_tuberpy_serialize_enum_class(resolve):
     assert r is True
 
 
-@pytest.mark.xfail
 @pytest.mark.asyncio
 async def test_tuberpy_async_context_with_unserializable(resolve):
-    """Ensure exceptions in a sequence of calls show up as expected."""
+    """An unserializable result in a batch is a per-item error; other results are unaffected."""
     s = await resolve("Wrapper")
 
-    async with tuber_context(s) as ctx:
-        r1 = ctx.increment([1, 2, 3])  # fine
-        r2 = ctx.unserializable()
-        r3 = ctx.increment([5, 6, 6])  # shouldn't execute
+    with pytest.raises(tuber.TuberRemoteError):
+        async with tuber_context(s) as ctx:
+            r1 = ctx.increment([1, 2, 3])  # fine
+            r2 = ctx.unserializable()  # encoding error
+            r3 = ctx.increment([5, 6, 6])  # still executes
 
-    await tuber_result(r1)
+    assert await tuber_result(r1) == [2, 3, 4]
 
     with pytest.raises(tuber.TuberRemoteError):
         await tuber_result(r2)
 
-    with pytest.raises(tuber.TuberRemoteError):
-        await tuber_result(r3)
+    assert await tuber_result(r3) == [6, 7, 7]
 
 
 @pytest.mark.asyncio

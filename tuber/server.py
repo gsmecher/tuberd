@@ -411,17 +411,42 @@ class RequestHandler:
 
     def encode(self, data, fmt=None):
         """
-        Encode the input data using the requested format.
+        Encode a response packet, or a list of packets, using the requested
+        format.
+
+        Packets are validated individually. A list is encoded in one pass;
+        if that fails, each packet is re-encoded on its own so the error is
+        reported against the response that caused it, and the pieces are
+        joined.
 
         Returns the response format and the encoded data.
         """
         if fmt is None:
             fmt = self.default_format
+        codec = self.codecs[fmt]
+        batch = isinstance(data, list)
+
+        items = []
+        for d in data if batch else [data]:
+            try:
+                self.validate(d, schema.response)
+            except Exception as e:
+                d = error_response(e)
+            items.append(d)
+
         try:
-            self.validate(data, schema.response)
+            return fmt, codec.encode(items if batch else items[0])
         except Exception as e:
-            data = error_response(e)
-        return fmt, self.codecs[fmt].encode(data)
+            if not batch:
+                return fmt, codec.encode(error_response(e))
+
+        parts = []
+        for d in items:
+            try:
+                parts.append(codec.encode(d))
+            except Exception as e:
+                parts.append(codec.encode(error_response(e)))
+        return fmt, codec.join_encoded(parts)
 
     def decode(self, data, fmt=None):
         """
@@ -463,7 +488,6 @@ class RequestHandler:
             The encoded response string
         """
         request_format = response_format = self.default_format
-        encode = lambda d: self.encode(d, response_format)
 
         try:
             # parse request format
@@ -494,7 +518,7 @@ class RequestHandler:
             # parse single request
             if isinstance(request_obj, dict):
                 result = self.invoke(request_obj)
-                return encode(result)
+                return self.encode(result, response_format)
 
             if not isinstance(request_obj, list):
                 raise TypeError("Unexpected type in request")
@@ -517,10 +541,10 @@ class RequestHandler:
                 if "error" in results[i] and not continue_on_error:
                     early_bail = True
 
-            return encode(results)
+            return self.encode(results, response_format)
 
         except Exception as e:
-            return encode(error_response(e))
+            return self.encode(error_response(e), response_format)
 
     def invoke(self, request):
         """
