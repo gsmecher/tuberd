@@ -1,5 +1,6 @@
 from collections.abc import Sequence, Mapping
 from collections import namedtuple
+import io
 import sys
 import types
 import json
@@ -262,13 +263,11 @@ if have_cbor:
         pre-encoded item's bytes directly. This is valid CBOR: a definite-length array
         header followed by N complete CBOR data items.
         """
-        import io
-
         buf = io.BytesIO()
         enc = cbor2.CBOREncoder(buf)
         enc.encode_length(4, len(encoded_items))  # CBOR major type 4 = array
         for item_bytes in encoded_items:
-            buf.write(item_bytes)
+            enc.write(item_bytes)
         return buf.getvalue()
 
     Codecs["cbor"] = Codec(decode=decode_cbor, encode=encode_cbor, join_encoded=join_encoded_cbor)
