@@ -46,7 +46,7 @@ jobs:
         uses: pypa/cibuildwheel@v4.2.1
         env:
           CIBW_ARCHS: ${{ matrix.arch }}
-          CIBW_SKIP: cp314t-*
+          CIBW_SKIP: cp314t-* cp315-* cp315t-*
           CIBW_BUILD_VERBOSITY: 1
 
       - name: Upload artifacts
