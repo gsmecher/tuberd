@@ -54,10 +54,19 @@ method calls on those attributes translate directly to HTTP requests::
   state = driver.get_all()   # returns a TuberResult (attribute-style access)
   print(state.knob)          # 42
 
-Pass ``convert_json=False`` if you prefer plain Python dicts::
+Each open keep-alive connection occupies one of the server's worker threads.
+A client's connections are closed once it is no longer referenced, but
+``close()`` releases them immediately, for the client and every object
+reached through it::
 
-  client = tuber.resolve_simple("localhost:8080", convert_json=False)
-  state = client.driver.get_all()   # {"label": ..., "button": ..., "knob": ...}
+  client.close()
+
+A client can also be used as a context manager, which closes it on exit.
+This suits short-lived clients, such as one that returns plain Python dicts
+(``convert_json=False``)::
+
+  with tuber.resolve_simple("localhost:8080", convert_json=False) as client:
+      state = client.driver.get_all()   # {"label": ..., "button": ..., "knob": ...}
 
 Server-side exceptions are raised as ``tuber.TuberRemoteError``, whose message
 includes the server-side traceback::
@@ -126,8 +135,8 @@ a single request::
 compact binary encoding in which numpy arrays are sent as typed arrays and
 decoded back into numpy arrays::
 
-  cbor_client = tuber.resolve_simple("localhost:8080", accept_types=["application/cbor"])
-  samples = cbor_client.thermometer.read_samples(8)   # numpy.ndarray
+  with tuber.resolve_simple("localhost:8080", accept_types=["application/cbor"]) as cbor_client:
+      samples = cbor_client.thermometer.read_samples(8)   # numpy.ndarray
 
 Asynchronous client
 ~~~~~~~~~~~~~~~~~~~
@@ -145,6 +154,10 @@ coroutine.  It accepts the same options as ``resolve_simple()``::
 
   await driver.set_knob(42)
   state = await driver.get_all()
+
+Async clients share one HTTP session per event loop, which is closed along
+with the loop (e.g. when ``asyncio.run()`` returns), so they need no
+``close()``.
 
 Async batching uses ``async with``.  Queued calls return awaitable futures;
 awaiting one sends every call queued so far::

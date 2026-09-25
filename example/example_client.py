@@ -41,8 +41,10 @@ state = driver.get_all()
 print(f"All state: label={state.label!r}, button={state.button}, knob={state.knob}")
 
 # Pass convert_json=False to get plain dicts instead of TuberResult objects.
-plain_client = tuber.resolve_simple("localhost:8080", convert_json=False)
-state_dict = plain_client.driver.get_all()
+# A client used as a context manager closes its HTTP connections on exit, which
+# suits short-lived clients like this one.
+with tuber.resolve_simple("localhost:8080", convert_json=False) as plain_client:
+    state_dict = plain_client.driver.get_all()
 print("As plain dict:", state_dict)
 
 # ── Thermometer ───────────────────────────────────────────────────────────────
@@ -175,7 +177,16 @@ print("All temperatures:", [f"{t:.2f}" for t in temps])
 
 print("\n=== CBOR and numpy ===")
 
-cbor_client = tuber.resolve_simple("localhost:8080", accept_types=["application/cbor"])
-samples = cbor_client.thermometer.read_samples(8)
+with tuber.resolve_simple("localhost:8080", accept_types=["application/cbor"]) as cbor_client:
+    samples = cbor_client.thermometer.read_samples(8)
 print(f"Samples: {type(samples).__name__} {samples.dtype} {samples.shape}")
 print(f"Mean: {samples.mean():.2f} °C")
+
+# ── Cleanup ───────────────────────────────────────────────────────────────────
+#
+# Each open keep-alive connection occupies one of the server's worker threads.
+# Connections are closed when a client is no longer referenced, but close()
+# releases them immediately.  It closes the connections shared by the whole
+# object tree, so driver, therm and sensors can no longer be used either.
+
+client.close()
