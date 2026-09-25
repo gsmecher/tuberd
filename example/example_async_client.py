@@ -16,7 +16,7 @@ import tuber
 async def main():
     # Connect to the server asynchronously.  The returned proxy works like the
     # synchronous one except that method calls are coroutines (use ``await``).
-    client = await tuber.resolve("localhost:8080")
+    client = await tuber.resolve("localhost:8080", timeout=5.0)
 
     # ── DeviceDriver ──────────────────────────────────────────────────────────
 
@@ -52,6 +52,17 @@ async def main():
     stats = await therm.read_stats(n=10)
     print(f"Stats (n={stats.n}): mean={stats.mean:.2f}, min={stats.min:.2f}, max={stats.max:.2f}")
 
+    # ── Errors ────────────────────────────────────────────────────────────────
+    #
+    # Server-side exceptions are raised on the client as TuberRemoteError.
+
+    print("\n=== Errors ===")
+
+    try:
+        await driver.set_knob(500)
+    except tuber.TuberRemoteError as e:
+        print("Remote error:", str(e).strip().splitlines()[-1])
+
     # ── Batched calls ─────────────────────────────────────────────────────────
     #
     # An async context manager batches multiple calls into one HTTP request.
@@ -71,6 +82,19 @@ async def main():
     print("set_knob:", results[1])
     print("get_all:", results[2])
 
+    # Each queued call also returns an awaitable future.  Awaiting one sends
+    # every call queued so far, so results can be used without leaving the
+    # context.  Any calls still queued when the context exits are sent
+    # automatically.
+
+    async with driver.tuber_context() as ctx:
+        ctx.push_button()
+        knob = await ctx.get_knob()  # sends push_button and get_knob together
+        print("Knob (mid-context):", knob)
+        ctx.set_knob(knob + 1)
+        new_knob = ctx.get_knob()
+    print("Knob (after exit):", await new_knob)  # flushed on context exit
+
     # ── Cross-object batch ────────────────────────────────────────────────────
     #
     # Open the context on the registry-level client to batch calls across objects.
@@ -84,6 +108,25 @@ async def main():
 
     print("driver:", results[0])
     print("thermometer:", f"{results[1]:.2f} °C")
+
+    # ── Errors in a batch ─────────────────────────────────────────────────────
+    #
+    # With return_exceptions=True, every call in the batch runs and each failure
+    # is returned in place of its result, including results that JSON cannot
+    # serialize (read_samples() returns a numpy array).
+
+    print("\n=== Errors in a batch ===")
+
+    async with client.tuber_context(return_exceptions=True) as ctx:
+        ctx.driver.set_knob(500)
+        ctx.thermometer.read_samples(4)
+        ctx.driver.get_knob()
+        results = await ctx()
+
+    for name, r in zip(["set_knob", "read_samples", "get_knob"], results):
+        if isinstance(r, Exception):
+            r = f"{type(r).__name__}: {str(r).strip().splitlines()[-1]}"
+        print(f"{name}: {r}")
 
     # ── Concurrent independent calls ──────────────────────────────────────────
     #
@@ -99,6 +142,23 @@ async def main():
         therm.read_temperature(),
     )
     print(f"button={button}, knob={knob}, temp={temp:.2f} °C")
+
+    # The same works across the items of an array of objects.
+    sensors = client.sensors
+    temps = await asyncio.gather(*(s.read_temperature() for s in sensors))
+    print("Sensor temperatures:", [f"{t:.2f}" for t in temps])
+    print("Calibrations:", await sensors.tuber_call("get_calibration"))
+
+    # ── CBOR and numpy ────────────────────────────────────────────────────────
+    #
+    # Request CBOR to receive numpy arrays as numpy arrays.
+
+    print("\n=== CBOR and numpy ===")
+
+    cbor_client = await tuber.resolve("localhost:8080", accept_types=["application/cbor"])
+    samples = await cbor_client.thermometer.read_samples(8)
+    print(f"Samples: {type(samples).__name__} {samples.dtype} {samples.shape}")
+    print(f"Mean: {samples.mean():.2f} °C")
 
 
 if __name__ == "__main__":

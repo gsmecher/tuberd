@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
 """
-Example tuber server exposing two simulated devices.
+Example tuber server exposing simulated devices.
 
 Run as:
     python example_server.py -p 8080
 """
 
 import random
+import warnings
+
+import numpy as np
+
+from tuber.server import TuberArray
 
 
 class DeviceDriver:
@@ -38,7 +43,11 @@ class DeviceDriver:
         return self.button
 
     def set_knob(self, value: int):
-        """Set the knob position and return the updated value."""
+        """Set the knob position (0-100) and return the updated value."""
+        # Exceptions raised here are sent back to the client and re-raised
+        # there as tuber.TuberRemoteError.
+        if not 0 <= value <= 100:
+            raise ValueError(f"Knob position {value} out of range (0-100)")
         self.knob = value
         return self.knob
 
@@ -76,6 +85,10 @@ class Thermometer:
 
     def set_calibration(self, offset: float):
         """Set the calibration offset (°C) and return the new value."""
+        # Warnings emitted during a call are forwarded to the client, where
+        # they are re-emitted with warnings.warn().
+        if abs(offset) > 5:
+            warnings.warn(f"Calibration offset {offset} °C is unusually large")
         self.offset = offset
         return self.offset
 
@@ -93,6 +106,15 @@ class Thermometer:
             "n": n,
         }
 
+    def read_samples(self, n: int = 8):
+        """Return n raw readings as a numpy array.
+
+        numpy arrays can only be sent to clients that accept CBOR, which encodes
+        them as typed arrays.  JSON cannot represent them, so JSON clients receive
+        a serialization error for this call instead.
+        """
+        return 20.0 + self.offset + np.random.normal(0, 0.5, n)
+
 
 if __name__ == "__main__":
     from tuber.server import main
@@ -100,6 +122,13 @@ if __name__ == "__main__":
     registry = {
         "driver": DeviceDriver(label="main-board"),
         "thermometer": Thermometer(label="ambient", offset=0.0),
+        # A TuberArray exposes a list (or dict) of identically-typed objects.
+        # The server sends one shared description for all items, and clients
+        # index into it like a list: client.sensors[2].read_temperature()
+        # Because the description is shared, static properties (e.g. label)
+        # are taken from the first item; per-item state must be read through
+        # methods.  Use TuberContainer for heterogeneous items.
+        "sensors": TuberArray([Thermometer(label="array-sensor", offset=round(0.1 * i, 1)) for i in range(4)]),
     }
 
     main(registry)
