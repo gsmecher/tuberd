@@ -432,6 +432,21 @@ def test_encode_batch_isolates_invalid_packet(handler_fmt):
     assert "error" in decoded[1]
 
 
+@pytest.mark.parametrize("order", ["C", "F"])
+@pytest.mark.parametrize("dtype", ["<u1", ">i2", "<f4", ">f8"])
+def test_cbor_ndarray_roundtrip(order, dtype):
+    """Multi-dimensional arrays survive a CBOR round-trip in either memory order."""
+    if "cbor" not in codecs.Codecs:
+        pytest.skip("cbor2 is not installed")
+    codec = codecs.Codecs["cbor"]
+    arr = np.arange(24, dtype=dtype).reshape((2, 3, 4), order=order)
+    decoded = codec.decode(codec.encode(arr))
+
+    assert decoded.dtype == arr.dtype
+    assert decoded.shape == arr.shape
+    assert np.array_equal(decoded, arr)
+
+
 #
 # pybind11 strenum tests. These tests are direct library imports and do not
 # exercise tuberd.
