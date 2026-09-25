@@ -3,6 +3,7 @@
 import aiohttp
 import asyncio
 import concurrent.futures
+import gc
 import importlib
 import inspect
 import numpy as np
@@ -10,6 +11,7 @@ import os
 import pytest
 import requests
 import warnings
+import weakref
 import tuber
 
 if os.getenv("CMAKE_TEST"):
@@ -535,11 +537,32 @@ def accept_types(request):
     return ACCEPT_TYPES[request.param]
 
 
+# Simple clients created by tests, closed after each test (see close_simple_clients)
+simple_clients = weakref.WeakSet()
+
+
+def resolve_simple(*args, **kwargs):
+    """tuber.resolve_simple(), closing the client once the test is done."""
+    s = tuber.resolve_simple(*args, **kwargs)
+    simple_clients.add(s)
+    return s
+
+
+@pytest.fixture(autouse=True)
+def close_simple_clients():
+    """Close the simple clients a test creates, so that their keep-alive
+    connections don't tie up tuberd's worker threads."""
+    yield
+    for s in list(simple_clients):
+        s.close()
+    simple_clients.clear()
+
+
 @pytest.fixture(scope="module", params=["simple", "async"])
 def resolve(request, tuberd_host, accept_types):
     async def resolver(objname=None, convert_json=None, return_exceptions=None):
         if request.param == "simple":
-            return tuber.resolve_simple(
+            return resolve_simple(
                 tuberd_host, objname, accept_types, convert_json=convert_json, return_exceptions=return_exceptions
             )
         else:
@@ -785,7 +808,7 @@ async def test_tuberpy_async_context_await_timeout(accept_types, tuberd_host):
 
 def test_tuberpy_simple_context_timeout(accept_types, tuberd_host):
     """A timed-out awaiter doesn't abort the flush other queued calls rely on."""
-    s = tuber.resolve_simple(tuberd_host, "SlowObject", accept_types)
+    s = resolve_simple(tuberd_host, "SlowObject", accept_types)
 
     with s.tuber_context() as ctx:
         r1 = ctx.sleep(0.1)
@@ -832,14 +855,14 @@ async def test_tuberpy_async_http_connect_timeout_tuple(accept_types):
 
 def test_tuberpy_simple_http_response_timeout_tuple(accept_types, tuberd_host):
     """HTTP response timeout via 2-tuple (connect, read) fires on slow responses."""
-    s = tuber.resolve_simple(tuberd_host, "SlowObject", accept_types, timeout=(10, 0.1))
+    s = resolve_simple(tuberd_host, "SlowObject", accept_types, timeout=(10, 0.1))
     with pytest.raises(requests.exceptions.ReadTimeout):
         s.sleep(0.5)
 
 
 def test_tuberpy_simple_http_response_timeout_tuple_none_connect(accept_types, tuberd_host):
     """HTTP response timeout via 2-tuple (None, read) fires when only read timeout is set."""
-    s = tuber.resolve_simple(tuberd_host, "SlowObject", accept_types, timeout=(None, 0.1))
+    s = resolve_simple(tuberd_host, "SlowObject", accept_types, timeout=(None, 0.1))
     with pytest.raises(requests.exceptions.ReadTimeout):
         s.sleep(0.5)
 
@@ -859,7 +882,7 @@ def test_tuberpy_simple_http_connect_timeout_tuple(accept_types):
 def test_tuberpy_simple_context_exception_flushes(accept_types, tuberd_host):
     """Retrieving a queued call's exception mid-context flushes the calls queued
     so far, in the same way as retrieving its result."""
-    s = tuber.resolve_simple(tuberd_host, "Wrapper", accept_types, return_exceptions=True)
+    s = resolve_simple(tuberd_host, "Wrapper", accept_types, return_exceptions=True)
 
     with s.tuber_context() as ctx:
         r1 = ctx.increment([1, 2, 3])
@@ -886,6 +909,38 @@ def test_tuberpy_simple_context_flush_connection_error(accept_types):
         r1 = ctx._add_call(object="Wrapper", method="increment", args=[[1, 2, 3]], kwargs={})
         with pytest.raises(requests.exceptions.ConnectionError):
             r1.result(timeout=10)
+
+
+def test_tuberpy_simple_close(accept_types, tuberd_host):
+    """Closing an object closes the connection pool shared by its whole tree."""
+    with tuber.resolve_simple(tuberd_host, accept_types=accept_types) as s:
+        assert s.Wrapper.increment([1, 2, 3]) == [2, 3, 4]
+
+    with pytest.raises(RuntimeError):
+        s.Wrapper.increment([1, 2, 3])
+
+
+@pytest.mark.parametrize("objname", ["Wrapper", "ObjectDict", "ObjectList", "Container", None])
+@pytest.mark.asyncio
+async def test_tuberpy_freed_without_gc(resolve, objname):
+    """Objects hold no reference cycles, so they (and the simple client's
+    connection pool) are freed as soon as they're no longer referenced."""
+    gc.collect()
+    gc.disable()
+    try:
+        s = await resolve(objname)
+        if objname == "Wrapper":
+            assert (await tuber_result(s.increment([1, 2, 3]))) == [2, 3, 4]
+            async with tuber_context(s) as ctx:
+                r = ctx.increment([1, 2, 3])
+            assert (await tuber_result(r)) == [2, 3, 4]
+            del ctx, r
+
+        ref = weakref.ref(s)
+        del s
+        assert ref() is None
+    finally:
+        gc.enable()
 
 
 @pytest.mark.asyncio
@@ -984,7 +1039,7 @@ async def test_tuberpy_registry_context(resolve):
 def test_tuberpy_fake_async(accept_types, tuberd_host):
     """Ensure async execution works with simple context"""
 
-    s = tuber.resolve_simple(tuberd_host, accept_types=accept_types)
+    s = resolve_simple(tuberd_host, accept_types=accept_types)
 
     with s.tuber_context() as ctx:
         ctx.Wrapper.increment(x=[1, 2, 3])

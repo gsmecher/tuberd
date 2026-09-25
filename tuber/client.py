@@ -341,7 +341,6 @@ class SimpleContext:
             timeout = self.obj._timeout
         self.timeout = timeout
         self.ctx_kwargs = ctx_kwargs
-        self.container = {}
 
     def __enter__(self):
         return self
@@ -350,11 +349,13 @@ class SimpleContext:
         if self.calls:
             self()
 
+    # Sub-contexts refer back to this context, so they're created afresh on
+    # each access rather than cached here: caching them would make every
+    # context a reference cycle, keeping its object (and the object's
+    # connection pool) alive until the next garbage collection.
     def __getitem__(self, item: str | int):
-        if item not in self.container:
-            objname = get_object_name(self.obj._tuber_objname, item=item)
-            self.container[item] = SubContext(objname, parent=self)
-        return self.container[item]
+        objname = get_object_name(self.obj._tuber_objname, item=item)
+        return SubContext(objname, parent=self)
 
     def __getattr__(self, name: str):
         if attribute_blacklisted(name):
@@ -362,12 +363,8 @@ class SimpleContext:
 
         # Queue methods of registry entries using the top-level registry context
         if self.obj._tuber_objname is None:
-            ctx = SubContext([name], parent=self)
-        else:
-            ctx = SubContext(self.obj._tuber_objname, attrname=name, parent=self)
-
-        setattr(self, name, ctx)
-        return ctx
+            return SubContext([name], parent=self)
+        return SubContext(self.obj._tuber_objname, attrname=name, parent=self)
 
     def _add_call(self, **request):
         future = SimpleContextFuture(self)
@@ -860,6 +857,7 @@ class SimpleTuberObject:
         self._tuber_objname = objname
         self._tuber_resolved = False
         self._tuber_meta = None
+        self._tuber_methods = {}
         if parent is None:
             assert hostname, "Argument 'hostname' required"
             self._tuber_host = hostname
@@ -908,8 +906,41 @@ class SimpleTuberObject:
         return f"{self.__class__.__name__}({self._tuber_objname!r}, hostname={self._tuber_host!r})"
 
     def __getattr__(self, name: str):
+        # Remote methods are bound on each access rather than stored on the
+        # instance: a bound method in the instance dict would refer back to the
+        # instance, and the reference cycle would keep the object (and its
+        # connection pool) alive until the next garbage collection.
+        methods = self.__dict__.get("_tuber_methods")
+        if methods is not None and name in methods:
+            return types.MethodType(methods[name], self)
+
         # Useful hint
         raise AttributeError(f"'{self._tuber_objname}' has no attribute '{name}'.  Did you run tuber_resolve()?")
+
+    def __dir__(self):
+        return sorted(set(super().__dir__()) | set(self.__dict__.get("_tuber_methods", ())))
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
+    def close(self):
+        """Close the connection pool used by this object.
+
+        The pool is shared by every object resolved from the same root object,
+        none of which can make requests once it's closed. Otherwise, the pool
+        is closed once none of these objects are referenced any longer.
+        Objects can also be used as context managers, closing their pool on
+        exit.
+
+        Async objects share an aiohttp session per event loop instead, which is
+        closed along with the loop; for them, this does nothing.
+        """
+        session = self.__dict__.get("_tuber_requests_session")
+        if session is not None:
+            session.close()
 
     def __len__(self):
         try:
@@ -1010,7 +1041,7 @@ class SimpleTuberObject:
         methods = meta.setdefault("methods", {})
         # remove any methods that are no longer on the remote
         for k in set(self._tuber_meta["methods"]) - set(methods):
-            delattr(self, k)
+            del self._tuber_methods[k]
         if methods:
             # backwards compatibility for v0.15 and older: when assembling
             # metadata, older tuberd did not understand the "resolve=True"
@@ -1033,7 +1064,7 @@ class SimpleTuberObject:
                     # create method once and bind to each item in a container
                     methods[k] = v
 
-                setattr(self, k, types.MethodType(v, self))
+                self._tuber_methods[k] = v
 
         # static properties
         properties = meta.setdefault("properties", {})
@@ -1064,9 +1095,9 @@ class SimpleTuberObject:
         # rebuilding: changes may have been structural (e.g. dict-like to
         # list-like)
         if self._tuber_meta["container"]:
-            for k in ("_items", "keys", "values", "items", "tuber_get"):
-                if k in self.__dict__:
-                    delattr(self, k)
+            self.__dict__.pop("_items", None)
+            for k in ("keys", "values", "items", "tuber_get"):
+                self._tuber_methods.pop(k, None)
 
         if (values := meta.setdefault("values", None)) is not None:
             keys = meta.get("keys", None)
@@ -1091,9 +1122,9 @@ class SimpleTuberObject:
             self._items = items
 
             if not islist:
-                setattr(self, "keys", types.MethodType(lambda o: o._items.keys(), self))
-                setattr(self, "values", types.MethodType(lambda o: o._items.values(), self))
-                setattr(self, "items", types.MethodType(lambda o: o._items.items(), self))
+                self._tuber_methods["keys"] = lambda o: o._items.keys()
+                self._tuber_methods["values"] = lambda o: o._items.values()
+                self._tuber_methods["items"] = lambda o: o._items.items()
 
             def tuber_get(self, name: str, keys: list[str | int] | None = None):
                 """Get a property of every container item.
@@ -1109,7 +1140,7 @@ class SimpleTuberObject:
                         keys = self._items.keys()
                 return [getattr(self._items[k], name) for k in keys]
 
-            setattr(self, "tuber_get", types.MethodType(tuber_get, self))
+            self._tuber_methods["tuber_get"] = tuber_get
 
         # store names of resolved attributes
         self._tuber_meta = {
