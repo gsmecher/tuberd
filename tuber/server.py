@@ -708,9 +708,6 @@ class Server:
     """
 
     def __init__(self, registry, json_module="json", port=80, webroot=None, max_age=3600, validate=False):
-        # setup environment
-        os.environ["TUBER_SERVER"] = "1"
-
         handler = RequestHandler(registry, json_module, validate=validate)
         self._server = _runtime().Server(handler, port=port, webroot=webroot, max_age=max_age)
 
@@ -819,9 +816,6 @@ def parse_args(argv=None, registry=None):
         "--validate", action="store_true", help="Validate incoming and outgoing data packets using jsonschema"
     )
     args = P.parse_args(argv)
-
-    # setup environment (before the registry file runs any import of its own)
-    os.environ["TUBER_SERVER"] = "1"
 
     # load registry
     if registry is None:
