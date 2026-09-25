@@ -105,8 +105,10 @@ def cbor_encode_ndarray(enc, arr):
 
     if arr.flags.c_contiguous:
         md_tag = 40  # row-major
+        order = "C"
     elif arr.flags.f_contiguous:
         md_tag = 1040  # column-major
+        order = "F"
     else:
         raise cbor2.CBOREncodeTypeError("Serialization of non-contiguous numpy arrays is not implemented")
 
@@ -119,7 +121,8 @@ def cbor_encode_ndarray(enc, arr):
     enc.encode_length(6, type_tag)
     # the typed array payload is a bytestring (type 2)
     enc.encode_length(2, arr.nbytes)
-    enc.write(arr.tobytes())
+    # tobytes() defaults to row-major, so the memory order must match the tag
+    enc.write(arr.tobytes(order=order))
 
 
 def cbor_augment_encode(enc, obj):
