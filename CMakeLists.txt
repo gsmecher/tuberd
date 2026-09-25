@@ -44,7 +44,7 @@ if(BUILD_TESTING)
 		COMMAND python3 -m pytest tuber --doctest-modules)
 
 	set_tests_properties(test-native-json test-orjson-fastpath
-		PROPERTIES ENVIRONMENT "CMAKE_TEST=1;PATH=${CMAKE_BINARY_DIR}:$ENV{PATH};PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}")
+		PROPERTIES ENVIRONMENT "CMAKE_TEST=1;PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}")
 endif(BUILD_TESTING)
 
 install(FILES "include/tuber_support.hpp" DESTINATION include)
