@@ -47,6 +47,22 @@ static void run_server(py::object handler, int port=80, py::object webroot=py::n
 	 * https://brooker.co.za/blog/2024/05/09/nagle.html */
 	svr->set_tcp_nodelay(true);
 
+	/* Bind exclusively. cpp-httplib's default is SO_REUSEPORT (on Linux and
+	 * macOS), which lets a second server bind a port that already has a
+	 * live listener and silently shares connections between the two - so a
+	 * stray tuberd steals traffic from its replacement instead of failing
+	 * to start. SO_REUSEADDR still lets a restarted server bind past
+	 * TIME_WAIT connections left by its predecessor, but rejects a live
+	 * listener. On Windows SO_REUSEADDR alone allows the sharing too;
+	 * SO_EXCLUSIVEADDRUSE is the equivalent there. */
+	svr->set_socket_options([](socket_t sock) {
+#ifdef _WIN32
+		httplib::set_socket_opt(sock, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, 1);
+#else
+		httplib::set_socket_opt(sock, SOL_SOCKET, SO_REUSEADDR, 1);
+#endif
+	});
+
 	/* Set up /tuber endpoint.
 	 *
 	 * This serves both "hot" (method call) and "cold" paths (metadata,
