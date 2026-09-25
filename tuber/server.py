@@ -411,28 +411,42 @@ class RequestHandler:
 
     def encode(self, data, fmt=None):
         """
-        Encode the input data using the requested format.
+        Encode a response packet, or a list of packets, using the requested
+        format.
+
+        Packets are validated individually. A list is encoded in one pass;
+        if that fails, each packet is re-encoded on its own so the error is
+        reported against the response that caused it, and the pieces are
+        joined.
 
         Returns the response format and the encoded data.
         """
         if fmt is None:
             fmt = self.default_format
+        codec = self.codecs[fmt]
+        batch = isinstance(data, list)
+
+        items = []
+        for d in data if batch else [data]:
+            try:
+                self.validate(d, schema.response)
+            except Exception as e:
+                d = error_response(e)
+            items.append(d)
+
         try:
-            self.validate(data, schema.response)
-            return fmt, self.codecs[fmt].encode(data)
+            return fmt, codec.encode(items if batch else items[0])
         except Exception as e:
-            data = error_response(e)
-        return fmt, self.codecs[fmt].encode(data)
+            if not batch:
+                return fmt, codec.encode(error_response(e))
 
-    def encode_list(self, data, fmt=None):
-        """
-        Encode a list of data packets using the requested format.
-
-        Returns the response format and the encoded data.
-        """
-        if fmt is None:
-            fmt = self.default_format
-        return fmt, self.codecs[fmt].join_encoded([self.encode(d, fmt)[1] for d in data])
+        parts = []
+        for d in items:
+            try:
+                parts.append(codec.encode(d))
+            except Exception as e:
+                parts.append(codec.encode(error_response(e)))
+        return fmt, codec.join_encoded(parts)
 
     def decode(self, data, fmt=None):
         """
@@ -527,7 +541,7 @@ class RequestHandler:
                 if "error" in results[i] and not continue_on_error:
                     early_bail = True
 
-            return self.encode_list(results, response_format)
+            return self.encode(results, response_format)
 
         except Exception as e:
             return self.encode(error_response(e), response_format)
