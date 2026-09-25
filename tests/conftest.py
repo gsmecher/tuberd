@@ -1,13 +1,10 @@
-import os
 import pytest
 import requests
-import socket
-import subprocess
-import sys
-import time
+import threading
 import warnings
 
 from tuber import codecs
+from tuber import server as tuber_server
 
 pytest_plugins = ("pytest_asyncio",)
 
@@ -17,18 +14,10 @@ def pytest_configure(config):
     config.addinivalue_line("markers", "orjson: marks tests that require server-side serialization of numpy arrays")
 
 
-# Allow test invocation to specify arguments to tuberd backend (this way, we
-# can re-use the same test machinery across different json libraries.)
+# The same test machinery is run against different JSON libraries; "--orjson"
+# switches the server to orjson and enables the tests that depend on it.
 def pytest_addoption(parser):
-    # Create a pass-through path for tuberd options (e.g. for verbosity)
-    parser.addoption("--tuberd-option", action="append", default=[])
-
-    # The "--orjson" option is handled as a special case because it
-    # changes test behaviour.
     parser.addoption("--orjson", action="store_true", default=False)
-
-    # Allow tuberd port to be specified
-    parser.addoption("--tuberd-port", default=8080)
 
 
 # Some tests require orjson - the following skips them unless we're in
@@ -43,56 +32,53 @@ def pytest_collection_modifyitems(config, items):
 
 
 @pytest.fixture(scope="module")
-def tuberd_host(pytestconfig):
-    return f"localhost:{pytestconfig.getoption('tuberd_port')}"
+def tuberd_host(tuberd):
+    return f"localhost:{tuberd.port}"
 
 
 @pytest.fixture(scope="module", autouse=True)
 def tuberd(request, pytestconfig):
-    """Spawn (and kill) a tuberd"""
-
-    TUBERD_PORT = pytestconfig.getoption("tuberd_port")
-
-    if os.getenv("CMAKE_TEST"):
-        tuberd = [sys.executable, "-m", "tuber.server"]
-    else:
-        tuberd = ["tuberd"]
+    """
+    Run a tuberd on a background thread for the duration of the module.
+    """
 
     registry = request.node.fspath
 
-    argv = tuberd + [
-        f"-p{TUBERD_PORT}",
+    # Port 0 lets the kernel pick a free port, so concurrent test runs never
+    # collide; the server reports the one it got.
+    argv = [
+        "--port=0",
         f"--registry={registry}",
-        f"--validate",
+        "--validate",
     ]
 
-    argv.extend(pytestconfig.getoption("tuberd_option"))
-
     if pytestconfig.getoption("orjson"):
-        # If we can't import orjson here, it's presumably missing from the
-        # tuberd execution environment as well - in which case, we should skip
-        # the test.
         pytest.importorskip("orjson")
         argv.extend(["--json", "orjson"])
 
-    s = subprocess.Popen(argv)
+    server = tuber_server.Server(**vars(tuber_server.parse_args(argv)))
 
-    # The server takes a moment to come up (it sources this test file as a
-    # registry) - don't release tests against it until it's listening.
-    for _ in range(100):
-        if s.poll() is not None:
-            raise RuntimeError(f"tuberd exited on startup with code {s.returncode}")
+    # An exception on the server thread would otherwise only reach the
+    # console; keep it so teardown can report it.
+    failure = []
+
+    def serve():
         try:
-            with socket.create_connection(("localhost", int(TUBERD_PORT)), timeout=0.1):
-                break
-        except OSError:
-            time.sleep(0.1)
-    else:
-        s.terminate()
-        raise RuntimeError("tuberd did not start listening")
+            server.serve()
+        except BaseException as e:
+            failure.append(e)
 
-    yield s
-    s.terminate()
+    thread = threading.Thread(target=serve, name="tuberd", daemon=True)
+    thread.start()
+
+    yield server
+
+    server.stop()
+    thread.join(timeout=30)
+    if thread.is_alive():
+        raise RuntimeError("tuberd did not stop")
+    if failure:
+        raise RuntimeError("tuberd failed") from failure[0]
 
 
 # This fixture provides a much simpler, synchronous wrapper for functionality
@@ -105,14 +91,7 @@ def tuber_call(request, tuberd_host):
     accept = f"application/{request.param}"
     loads = lambda d: codecs.AcceptTypes[accept](d, encoding="utf-8", convert=False)
 
-    # The tuber daemon can take a little while to start (in particular, it
-    # sources this script as a registry) - rather than adding a magic sleep to
-    # the subprocess command, we teach the client interface to wait patiently.
-    adapter = requests.adapters.HTTPAdapter(
-        max_retries=requests.packages.urllib3.util.retry.Retry(total=10, backoff_factor=1)
-    )
     session = requests.Session()
-    session.mount(URI, adapter)
 
     def tuber_call(json=None, **kwargs):
         # The most explicit call style passes POST content via an explicit
