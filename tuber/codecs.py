@@ -186,8 +186,12 @@ def encode_json(obj, **kwargs):
 
 
 def join_encoded_json(encoded_items):
-    """Assemble a JSON array from individually encoded item strings."""
-    return "[" + ",".join(encoded_items) + "]"
+    """Assemble a JSON array from individually encoded item strings.
+
+    The separator matches the default json.dumps() item separator, so the
+    result is byte-identical to encoding the list in one pass.
+    """
+    return "[" + ", ".join(encoded_items) + "]"
 
 
 Codecs["json"] = Codec(decode=decode_json, encode=encode_json, join_encoded=join_encoded_json)
