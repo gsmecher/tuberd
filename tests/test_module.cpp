@@ -22,7 +22,11 @@ class Wrapper {
 		};
 };
 
+#if PYBIND11_VERSION_HEX >= 0x020D0000
+PYBIND11_MODULE(test_module, m, py::mod_gil_not_used()) {
+#else
 PYBIND11_MODULE(test_module, m) {
+#endif
 
 	/* this forced scope ensures Kind is registered before it's used in
 	 * default arguments below. */
