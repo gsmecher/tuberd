@@ -662,9 +662,34 @@ class RequestHandler:
         return self.handle(*args, **kwargs)
 
 
-def run(registry, json_module="json", port=80, webroot=None, max_age=3600, validate=False):
+def _runtime():
     """
-    Run tuber server with the given registry.
+    Import the compiled server runtime.
+
+    Under CMake-driven testing the module is picked up from the build
+    directory rather than from inside the package.
+    """
+    if os.getenv("CMAKE_TEST"):
+        import _tuber_runtime  # type: ignore
+    else:
+        from . import _tuber_runtime
+
+    return _tuber_runtime
+
+
+class Server:
+    """
+    A tuber server for the given registry.
+
+    Constructing a Server binds its port, so ``port`` is valid as soon as the
+    constructor returns. This is how to find the port the kernel chose when
+    ``port=0`` is requested, and a client started at that point can connect
+    straight away: the socket is already listening, and connections queue
+    until :meth:`serve` picks them up.
+
+    Call :meth:`serve` to handle requests. It blocks until :meth:`stop` is
+    called from another thread or, when serving on the main thread, the
+    process receives SIGINT. A stopped server cannot be restarted.
 
     Arguments
     ---------
@@ -673,7 +698,7 @@ def run(registry, json_module="json", port=80, webroot=None, max_age=3600, valid
     json_module : str
         Python package to use for encoding and decoding JSON requests.
     port : int
-        Port on which to run the server
+        Port to bind. Port 0 selects any free port.
     webroot : str
         Location to serve static content
     max_age : int
@@ -681,20 +706,55 @@ def run(registry, json_module="json", port=80, webroot=None, max_age=3600, valid
     validate : bool
         If True, validate incoming and outgoing data packets using jsonschema
     """
-    # setup environment
-    os.environ["TUBER_SERVER"] = "1"
 
-    # import runtime
-    if os.getenv("CMAKE_TEST"):
-        from _tuber_runtime import run_server  # type: ignore
-    else:
-        from ._tuber_runtime import run_server
+    def __init__(self, registry, json_module="json", port=80, webroot=None, max_age=3600, validate=False):
+        # setup environment
+        os.environ["TUBER_SERVER"] = "1"
 
-    # prepare handler
-    handler = RequestHandler(registry, json_module, validate=validate)
+        handler = RequestHandler(registry, json_module, validate=validate)
+        self._server = _runtime().Server(handler, port=port, webroot=webroot, max_age=max_age)
 
-    # run
-    run_server(handler, port=port, webroot=webroot, max_age=max_age)
+    @property
+    def port(self):
+        """The port this server is bound to."""
+        return self._server.port
+
+    def serve(self, handle_sigint=None):
+        """
+        Handle requests until stopped. Blocks the calling thread.
+
+        Arguments
+        ---------
+        handle_sigint : bool
+            Install a SIGINT handler that stops the server for the duration
+            of the call. Defaults to True on the main thread and False
+            elsewhere: a process-wide signal handler only belongs to the main
+            thread (the signal module enforces the same rule), and a server
+            on a background thread is stopped with :meth:`stop` instead.
+        """
+        import threading
+
+        if handle_sigint is None:
+            handle_sigint = threading.current_thread() is threading.main_thread()
+
+        self._server.serve(handle_sigint)
+
+    def stop(self):
+        """
+        Stop the server. Safe to call from any thread; :meth:`serve` returns
+        once the server's worker threads have wound down.
+        """
+        self._server.stop()
+
+
+def run(registry, **kwargs):
+    """
+    Run a tuber server with the given registry until it is stopped.
+
+    Shorthand for ``Server(registry, **kwargs).serve()``; see :class:`Server`
+    for the arguments.
+    """
+    Server(registry, **kwargs).serve()
 
 
 def load_registry(filename):
@@ -712,12 +772,21 @@ def load_registry(filename):
     return mod.registry
 
 
-def main(registry=None):
+def parse_args(argv=None, registry=None):
     """
-    Server entry point.
+    Parse tuberd command-line arguments.
 
-    If supplied, run the server with the given registry.  Otherwise, use the
-    ``--registry`` command-line argument to provide a path to a registry file.
+    Returns a namespace whose attributes are the keyword arguments of
+    :class:`Server`, with the registry already loaded: ``Server(**vars(args))``
+    builds the server the command line describes.
+
+    Arguments
+    ---------
+    argv : list of str
+        Arguments to parse instead of ``sys.argv``.
+    registry : dict
+        Registry to serve. When omitted, a ``--registry`` option supplies the
+        path of a Python file that defines one.
     """
 
     import argparse as ap
@@ -737,7 +806,7 @@ def main(registry=None):
         dest="json_module",
         help="Python JSON module to use for serialization/deserialization",
     )
-    P.add_argument("-p", "--port", default=80, type=int, help="Port")
+    P.add_argument("-p", "--port", default=80, type=int, help="Port (0 selects any free port)")
     P.add_argument("-w", "--webroot", help="Location to serve static content")
     P.add_argument(
         "-a",
@@ -749,15 +818,27 @@ def main(registry=None):
     P.add_argument(
         "--validate", action="store_true", help="Validate incoming and outgoing data packets using jsonschema"
     )
-    args = P.parse_args()
+    args = P.parse_args(argv)
 
-    # setup environment
+    # setup environment (before the registry file runs any import of its own)
     os.environ["TUBER_SERVER"] = "1"
 
     # load registry
-    args.registry = registry if registry else load_registry(args.registry)
+    if registry is None:
+        registry = load_registry(args.registry)
+    args.registry = registry
 
-    run(**vars(args))
+    return args
+
+
+def main(registry=None, argv=None):
+    """
+    Server entry point: parse arguments, bind, and serve until stopped.
+
+    If supplied, serve the given registry.  Otherwise, use the ``--registry``
+    command-line argument to provide a path to a registry file.
+    """
+    Server(**vars(parse_args(argv, registry))).serve()
 
 
 if __name__ == "__main__":
