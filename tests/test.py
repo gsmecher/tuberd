@@ -288,14 +288,11 @@ def test_double_vector(tuber_call):
 
 
 def test_unserializable(tuber_call):
-    # Errors differ between orjson, standard json, and CBOR
+    # Exception types differ between orjson, standard json, and CBOR, but every
+    # codec must identify the object that could not be encoded.
     message = tuber_call(object="Wrapper", method="unserializable")["error"]["message"]
-    assert (
-        message.startswith("ValueError:")
-        or message.startswith("CBOREncodeTypeError:")
-        or message.startswith("TypeError: default serializer")
-        or message.startswith("CBOREncodeTypeError: cannot serialize")
-    )
+    assert message.startswith(("TypeError:", "CBOREncodeTypeError:"))
+    assert "Wrapper" in message
 
 
 def test_batch_unserializable_isolated(tuber_call):

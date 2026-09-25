@@ -42,19 +42,36 @@ class TuberResult(types.SimpleNamespace):
     pass
 
 
-def wrap_bytes_for_json(obj):
+def json_default(obj):
     """
+    Fall-back hook for objects the JSON encoders cannot serialize natively.
+
     JSON cannot (natively) encode bytes, so we provide a simple encoding for them.
     This allows uniformity when using either JSON or binary formats (CBOR, etc.)
     which do have native binary support. The JSON encoding is not meant to be
     especially efficient, since anyone wanting seriously move around significant
     amounts of binary data should use another format, but it provides a
     consistent, readable/debuggable, fall-back.
+
+    Any other unsupported object is rejected here.  This hook is only called for
+    objects the encoder cannot serialize natively, and must either return a
+    substitute or raise; returning the object unchanged makes the encoder recurse
+    on it, reporting an unhelpful "Circular reference detected" instead.
     """
     if isinstance(obj, bytes):
         data = [int(v) for v in obj]
         return {"bytes": data}
-    return obj
+
+    # This message is handed back to the client, so keep the detail bounded, and
+    # tolerate objects whose repr() raises.
+    try:
+        detail = repr(obj)
+    except Exception:
+        detail = "<unrepresentable>"
+    if len(detail) > 80:
+        detail = detail[:77] + "..."
+
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable: {detail}")
 
 
 def cbor_encode_ndarray(enc, arr):
@@ -182,7 +199,7 @@ def decode_json(response_data, **kwargs):
 def encode_json(obj, **kwargs):
     if have_simplejson:
         kwargs.setdefault("encoding", None)
-    return json.dumps(obj, default=wrap_bytes_for_json, **kwargs)
+    return json.dumps(obj, default=json_default, **kwargs)
 
 
 def join_encoded_json(encoded_items):
@@ -205,7 +222,7 @@ if have_orjson:
     def encode_orjson(obj, **kwargs):
         if have_numpy:
             kwargs["option"] = kwargs.get("option", 0) | orjson.OPT_SERIALIZE_NUMPY
-        return orjson.dumps(obj, default=wrap_bytes_for_json, **kwargs)
+        return orjson.dumps(obj, default=json_default, **kwargs)
 
     def join_encoded_orjson(encoded_items):
         """Assemble a JSON array from individually encoded item byte strings."""
