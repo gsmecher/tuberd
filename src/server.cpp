@@ -1,3 +1,4 @@
+#include <atomic>
 #include <csignal>
 #include <filesystem>
 #include <limits>
@@ -17,35 +18,56 @@ namespace fs = std::filesystem;
 /* Fallback MIME type */
 static const std::string MIME_DEFAULT="text/plain";
 
-/* Unfortunately, we need to carry around a global pointer just for signal handling. */
-static std::unique_ptr<httplib::Server> svr = nullptr;
+class Server;
+
+/* The SIGINT handler needs a way back to the server it should stop. Only a
+ * server that installed the handler (serve() with handle_sigint) is
+ * registered here, and only for as long as it is serving. */
+static std::atomic<Server*> sigint_target = nullptr;
+
+/*
+ * A tuber server. Construction binds the port (so port() is valid, and a
+ * client told about it can connect, as soon as the constructor returns);
+ * serve() runs the accept loop until stop() is called from another thread
+ * or, when handling SIGINT, the process is interrupted.
+ */
+class Server {
+public:
+	Server(py::object handler, int port, py::object webroot, int max_age);
+	~Server();
+
+	int port() const { return port_; }
+	void serve(bool handle_sigint);
+	void stop();
+
+private:
+	std::unique_ptr<httplib::Server> svr_;
+	int port_ = -1;
+	bool served_ = false;
+
+	/* Distinguishes a requested stop (which makes listen_after_bind()
+	 * return false if it lands before the accept loop starts) from a
+	 * genuine failure to listen. */
+	std::atomic<bool> stop_requested_ = false;
+};
+
 static void sigint(int signo) {
-	if(svr)
-		svr->stop();
+	if (Server *s = sigint_target.load())
+		s->stop();
 }
 
-static void run_server(py::object handler, int port=80, py::object webroot=py::none(), int max_age=3600)
+Server::Server(py::object handler, int port, py::object webroot, int max_age)
+	: svr_(std::make_unique<httplib::Server>())
 {
-	/* Can only run one server at a time */
-	if (svr)
-		throw std::runtime_error("Tuber server already running!");
-
-	/*
-	 * Start webserver
-	 */
-
-	svr = std::make_unique<httplib::Server>();
-	std::signal(SIGINT, &sigint);
-
 	/* A single long-lived keep-alive connection with a single client is
 	 * the expected "hot path": don't cap the number of requests it can
 	 * carry. The idle timeout is left at cpp-httplib's default (5s). */
-	svr->set_keep_alive_max_count(std::numeric_limits<size_t>::max());
-	svr->set_default_file_mimetype(MIME_DEFAULT);
+	svr_->set_keep_alive_max_count(std::numeric_limits<size_t>::max());
+	svr_->set_default_file_mimetype(MIME_DEFAULT);
 
 	/* It's Always TCP_NODELAY. Every damn time.
 	 * https://brooker.co.za/blog/2024/05/09/nagle.html */
-	svr->set_tcp_nodelay(true);
+	svr_->set_tcp_nodelay(true);
 
 	/* Bind exclusively. cpp-httplib's default is SO_REUSEPORT (on Linux and
 	 * macOS), which lets a second server bind a port that already has a
@@ -55,7 +77,7 @@ static void run_server(py::object handler, int port=80, py::object webroot=py::n
 	 * TIME_WAIT connections left by its predecessor, but rejects a live
 	 * listener. On Windows SO_REUSEADDR alone allows the sharing too;
 	 * SO_EXCLUSIVEADDRUSE is the equivalent there. */
-	svr->set_socket_options([](socket_t sock) {
+	svr_->set_socket_options([](socket_t sock) {
 #ifdef _WIN32
 		httplib::set_socket_opt(sock, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, 1);
 #else
@@ -69,7 +91,7 @@ static void run_server(py::object handler, int port=80, py::object webroot=py::n
 	 * cached property fetches). All paths are coded in Python (in the
 	 * tuber.server package), with hot path dispatch to C++ handled by the
 	 * user. */
-	svr->Post("/tuber", [handler](const httplib::Request& req, httplib::Response& res) {
+	svr_->Post("/tuber", [handler](const httplib::Request& req, httplib::Response& res) {
 		py::gil_scoped_acquire acquire;
 
 		try {
@@ -121,7 +143,7 @@ static void run_server(py::object handler, int port=80, py::object webroot=py::n
 	});
 
 	/* The /tuber endpoint is POST-only. */
-	svr->Get("/tuber", [](const httplib::Request&, httplib::Response& res) {
+	svr_->Get("/tuber", [](const httplib::Request&, httplib::Response& res) {
 		res.status = 405;
 	});
 
@@ -132,7 +154,7 @@ static void run_server(py::object handler, int port=80, py::object webroot=py::n
 		/* Vary is set on every static response, not just the compressed ones:
 		 * a request for /foo.js may be answered from foo.js or foo.js.gz
 		 * depending on Accept-Encoding, so caches must key on it either way. */
-		if(!svr->set_mount_point("/", root.string(), {
+		if(!svr_->set_mount_point("/", root.string(), {
 					{"Cache-Control", "max-age="+std::to_string(max_age)},
 					{"Vary", "Accept-Encoding"}}))
 			throw std::runtime_error("Webroot is not a directory: " + root.string());
@@ -141,7 +163,7 @@ static void run_server(py::object handler, int port=80, py::object webroot=py::n
 		 * Anything it declines lands here: if the request says gzip
 		 * compressed transfers are acceptable, and we can find a file of the
 		 * expected name with a '.gz' suffix, send that instead. */
-		svr->Get(".*", [root, max_age](const httplib::Request& req, httplib::Response& res) {
+		svr_->Get(".*", [root, max_age](const httplib::Request& req, httplib::Response& res) {
 			auto accept_header = req.get_header_value("Accept-Encoding");
 			auto path = root / fs::path(req.path).relative_path();
 			path += ".gz";
@@ -173,43 +195,105 @@ static void run_server(py::object handler, int port=80, py::object webroot=py::n
 		});
 	}
 
-	/* Go! */
+	/* Bind now, serve later. cpp-httplib's bind step also calls listen(),
+	 * so from here on the kernel queues connections for us: a client that
+	 * learns the port from port() can connect before serve() is called.
+	 * Port 0 asks the kernel for any free port. */
+	port_ = (port == 0) ? svr_->bind_to_any_port("0.0.0.0")
+	                    : (svr_->bind_to_port("0.0.0.0", port) ? port : -1);
+
+	if (port_ < 0)
+		throw std::runtime_error("Tuber server could not bind to port " + std::to_string(port));
+}
+
+Server::~Server()
+{
+	/* Release the listening socket if serve() never ran. (If it did,
+	 * cpp-httplib already closed it on the way out, and joined its worker
+	 * threads before listen_after_bind() returned.) */
+	svr_->stop();
+}
+
+void Server::serve(bool handle_sigint)
+{
+	/* cpp-httplib closes the listening socket when the accept loop exits,
+	 * so a server cannot be resumed. */
+	if (served_)
+		throw std::runtime_error("Tuber server cannot be restarted after it has stopped");
+	served_ = true;
+
+	/* A process-wide signal handler only belongs to the main thread
+	 * (Python's signal module enforces the same rule), so callers serving
+	 * from a background thread opt out. Go through PyOS_setsig, as Python
+	 * does, and remember the previous disposition - normally Python's own
+	 * handler - so it can be restored rather than clobbered. */
+	PyOS_sighandler_t prev_sigint = SIG_DFL;
+	if (handle_sigint) {
+		sigint_target = this;
+		prev_sigint = PyOS_setsig(SIGINT, &sigint);
+	}
+
 	bool ok;
 	{
 		py::gil_scoped_release release;
-		ok = svr->listen("0.0.0.0", port);
+		ok = svr_->listen_after_bind();
 	}
 
-	/* Restore default signal disposition and release our handler
-	 * reference while the interpreter is still alive. (cpp-httplib joins
-	 * its worker threads before listen() returns.) */
-	std::signal(SIGINT, SIG_DFL);
-	svr.reset();
+	if (handle_sigint) {
+		PyOS_setsig(SIGINT, prev_sigint);
+		sigint_target = nullptr;
+	}
 
-	if (!ok)
-		throw std::runtime_error("Tuber server could not listen on port " + std::to_string(port));
+	/* A stop() that lands between bind and the start of the accept loop
+	 * makes listen_after_bind() return false; that's a normal shutdown. */
+	if (!ok && !stop_requested_)
+		throw std::runtime_error("Tuber server could not listen on port " + std::to_string(port_));
+}
+
+void Server::stop()
+{
+	/* httplib::Server::stop() is safe to call concurrently with the accept
+	 * loop, and svr_ never changes after construction, so this needs no
+	 * further synchronization with serve(). */
+	stop_requested_ = true;
+	svr_->stop();
 }
 
 
 PYBIND11_MODULE(_tuber_runtime, m) {
 	m.doc() = "Tuber server runtime library";
 
-	m.def("run_server", &run_server,
-	    "Main server runtime function that creates a webserver with a static webroot\n"
-	    "endpoint and a /tuber endpoint that parses requests via a handler function,\n"
-	    "and runs the server until an interrupt is signaled.\n\n"
-	    "Arguments\n---------\n"
-	    "handler : callable\n"
-	    "    Callable that takes an encoded request bytestring plus request headers,\n"
-	    "    and returns the response format and encoded response string. Signature:\n"
-	    "    ``function(request: bytes, *, content_type: str, accept: str,\n"
-	    "    x_tuber_options: str) -> tuple[str, str]``\n"
-	    "    Absent headers are passed as empty strings.\n"
-	    "port : int\n"
-	    "    Port on which to run the server\n"
-	    "webroot : str\n"
-	    "    Location to serve static content\n"
-	    "max_age : int\n"
-	    "    Maximum cache residency for static (file) assets\n",
-	    py::arg("handler"), py::arg("port")=80, py::arg("webroot")=py::none(), py::arg("max_age")=3600);
+	py::class_<Server>(m, "Server",
+	    "A webserver with a static webroot endpoint and a /tuber endpoint that\n"
+	    "parses requests via a handler function.\n\n"
+	    "Constructing a Server binds its port; call serve() to handle requests\n"
+	    "until stop() is called (from another thread) or, when handling SIGINT,\n"
+	    "the process is interrupted. A stopped server cannot be restarted.\n")
+		.def(py::init<py::object, int, py::object, int>(),
+		    "Arguments\n---------\n"
+		    "handler : callable\n"
+		    "    Callable that takes an encoded request bytestring plus request headers,\n"
+		    "    and returns the response format and encoded response string. Signature:\n"
+		    "    ``function(request: bytes, *, content_type: str, accept: str,\n"
+		    "    x_tuber_options: str) -> tuple[str, str]``\n"
+		    "    Absent headers are passed as empty strings.\n"
+		    "port : int\n"
+		    "    Port to bind. Port 0 selects any free port; see the ``port`` attribute.\n"
+		    "webroot : str\n"
+		    "    Location to serve static content\n"
+		    "max_age : int\n"
+		    "    Maximum cache residency for static (file) assets\n",
+		    py::arg("handler"), py::arg("port")=80, py::arg("webroot")=py::none(), py::arg("max_age")=3600)
+		.def_property_readonly("port", &Server::port,
+		    "The port this server is bound to.")
+		.def("serve", &Server::serve,
+		    "Handle requests until stopped. Blocks the calling thread.\n\n"
+		    "Arguments\n---------\n"
+		    "handle_sigint : bool\n"
+		    "    Install a SIGINT handler that stops the server for the duration of\n"
+		    "    the call. Only appropriate from the main thread.\n",
+		    py::arg("handle_sigint")=true)
+		.def("stop", &Server::stop,
+		    "Stop the server. Safe to call from any thread; serve() returns once the\n"
+		    "server's worker threads have wound down.\n");
 }

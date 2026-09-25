@@ -14,6 +14,16 @@ v0.18.6
   method, and can be used as context managers, to close their connection pool
   explicitly.
 
+- Add ``tuber.server.Server``: construction binds the port, ``serve()`` runs
+  until ``stop()`` is called from another thread (or SIGINT, on the main
+  thread), and ``port`` reports the bound port. Port 0 selects a free port.
+  ``run()`` and ``main()`` are now thin wrappers; ``parse_args()`` exposes the
+  command-line parsing ``main()`` uses. The SIGINT handler is only installed
+  when serving on the main thread, and Python's handler is restored on exit.
+
+- Tests run the server in-process on a free port rather than spawning a
+  tuberd on port 8080, so concurrent test runs (``ctest -j``) don't collide.
+
 v0.18.5
 =======
 
