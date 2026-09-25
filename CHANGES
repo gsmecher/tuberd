@@ -7,6 +7,10 @@ v0.18.6
   concurrently) must be thread-safe. For registry objects that aren't, run
   tuberd on a standard (GIL) Python build.
 
+- The simple client now emits server-side warnings from the calling thread,
+  and the async client from the awaiting task, so that they can be caught on
+  free-threaded Python.
+
 - Replace libhttpserver/libmicrohttpd with cpp-httplib, vendored as a single
   header in extern/. Building from source no longer needs any external HTTP
   dependency. The old libhttpserver API changed significantly with a 2.0
