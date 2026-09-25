@@ -10,6 +10,8 @@ import numpy as np
 import os
 import pytest
 import requests
+import sys
+import sysconfig
 import time
 import warnings
 import weakref
@@ -130,6 +132,13 @@ class SlowObject:
         return seconds
 
 
+class Runtime:
+    def gil_enabled(self):
+        # sys._is_gil_enabled() is new in Python 3.13; older interpreters
+        # always have a GIL.
+        return getattr(sys, "_is_gil_enabled", lambda: True)()
+
+
 # This module doubles as the registry file served by the tuberd fixture
 # (see conftest.py), so that network-exported code and locally-run code are
 # one and the same.
@@ -155,6 +164,7 @@ registry = {
     "NumPy": NumPy(),
     "Warnings": WarningsClass(),
     "SlowObject": SlowObject(),
+    "Runtime": Runtime(),
     "Wrapper": tm.Wrapper(),
 }
 
@@ -301,6 +311,26 @@ def test_numpy_types(tuber_call):
 @pytest.mark.orjson
 def test_double_vector(tuber_call):
     assert tuber_call(object="Wrapper", method="increment", args=[[1, 2, 3, 4, 5]]) == Succeeded([2, 3, 4, 5, 6])
+
+
+@pytest.mark.skipif(not sysconfig.get_config_var("Py_GIL_DISABLED"), reason="Requires a free-threaded Python build")
+def test_gil_disabled(tuber_call):
+    """Every extension module the server loads leaves the GIL disabled."""
+    assert tuber_call(object="Runtime", method="gil_enabled") == Succeeded(False)
+
+
+def test_parallel_requests(tuberd_host):
+    """Requests issued in parallel each get their own, correct result."""
+    uri = f"http://{tuberd_host}/tuber"
+
+    def call(i):
+        r = requests.post(uri, json=dict(object="Wrapper", method="increment", args=[[i] * 100]))
+        return r.json()
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
+        results = list(pool.map(call, range(200)))
+
+    assert results == [Succeeded([i + 1] * 100) for i in range(200)]
 
 
 def test_overlapping_request_warnings(tuber_call):
