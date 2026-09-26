@@ -11,18 +11,29 @@ on:
 
 jobs:
   build_wheels:
-    name: Build wheels for ${{ matrix.os }}-${{ matrix.arch }}
+    name: Build wheels for ${{ matrix.os }}-${{ matrix.platform }}_${{ matrix.arch }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
+      # Linux builds are split by libc so that manylinux and musllinux
+      # wheels build (and test) on separate runners in parallel.
       matrix:
         include:
           - os: macos-15
+            platform: macosx
             arch: arm64
             target: 11.0
           - os: ubuntu-24.04
+            platform: manylinux
+            arch: x86_64
+          - os: ubuntu-24.04
+            platform: musllinux
             arch: x86_64
           - os: ubuntu-24.04-arm
+            platform: manylinux
+            arch: aarch64
+          - os: ubuntu-24.04-arm
+            platform: musllinux
             arch: aarch64
 
     steps:
@@ -46,13 +57,14 @@ jobs:
         uses: pypa/cibuildwheel@v4.2.1
         env:
           CIBW_ARCHS: ${{ matrix.arch }}
+          CIBW_BUILD: "*-${{ matrix.platform }}_*"
           CIBW_SKIP: cp314t-* cp315-* cp315t-*
           CIBW_BUILD_VERBOSITY: 1
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: cibw-wheels-${{ matrix.os }}-${{ matrix.arch }}
+          name: cibw-wheels-${{ matrix.os }}-${{ matrix.platform }}_${{ matrix.arch }}
           path: ./wheelhouse/tuberd*.whl
 
   build_sdist:
