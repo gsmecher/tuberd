@@ -172,10 +172,24 @@ def resolve_method(method, bound=True):
     return out
 
 
-def check_attribute(obj, d):
+def resolve_property(obj, name):
+    """
+    Return a description of a dynamic property, without evaluating it.  A
+    Python @property is described by its docstring.
+    """
+    prop = getattr(type(obj), name, None)
+    doc = inspect.getdoc(prop) if isinstance(prop, property) else None
+    return dict(__doc__=doc) if doc else {}
+
+
+def check_attribute(obj, d, dynamic=False):
     """
     Return True if the given attribute is safe to resolve, False otherwise.
+    If dynamic is True, also require it to be a dynamic property (listed in
+    ``__tuber_dynamic__``), as clients may only set those.
     """
+    if dynamic and d not in getattr(obj, "__tuber_dynamic__", ()):
+        return False
     if d.startswith("__"):
         return False
     if d.startswith("_pybind11"):
@@ -189,6 +203,33 @@ def check_attribute(obj, d):
     return True
 
 
+def get_property(obj, name):
+    """
+    Return the value of an exported property (static or dynamic) of an object.
+    """
+    if not check_attribute(obj, name) or not hasattr(obj, name):
+        raise AttributeError(f"'{type(obj).__name__}' object has no property '{name}'")
+    attr = getattr(obj, name)
+    if callable(attr) or getattr(attr, "__tuber_object__", False):
+        raise AttributeError(f"'{name}' is not a property")
+    return attr
+
+
+def set_property(obj, name, value):
+    """
+    Set a dynamic property of an object.  Only exported attributes listed in
+    the object's ``__tuber_dynamic__`` may be set.
+    """
+    if not check_attribute(obj, name, dynamic=True):
+        raise AttributeError(f"'{name}' is not a dynamic property, and can't be set")
+    setattr(obj, name, value)
+
+
+# Methods that the request handler provides for any object that doesn't define
+# its own, so that clients can read and set properties with method calls
+property_methods = {"tuber_get": get_property, "tuber_set": set_property}
+
+
 def resolve_object(obj, recursive=True):
     """
     Return a dictionary of all valid object attributes classified by type.
@@ -197,24 +238,41 @@ def resolve_object(obj, recursive=True):
 
     objects: TuberContainer objects that are to be further resolved
     methods: Callable attributes
-    properties: Static property attributes
+    properties: Static property attributes (cached on the client after resolve)
+    dynamic_properties: Dynamic property attributes (fetched/set on each client access)
     """
 
     if recursive:
         objects = {}
         methods = {}
         props = {}
+        dynamic_props = {}
     else:
         methods = []
         props = []
+        dynamic_props = []
 
-    out = dict(__doc__=inspect.getdoc(obj), methods=methods, properties=props)
+    out = dict(__doc__=inspect.getdoc(obj), methods=methods, properties=props, dynamic_properties=dynamic_props)
+
+    # Dynamic properties (plain attributes or Python @property attributes) are
+    # listed in __tuber_dynamic__, and are read from and written to the server
+    # on every client access.  Any other property is static.
+    tuber_dynamic = getattr(obj, "__tuber_dynamic__", ())
 
     for d in dir(obj):
         # Don't export dunder methods or attributes - this avoids exporting
         # Python internals on the server side to any client.
         if not check_attribute(obj, d):
             continue
+
+        # Dynamic properties are not evaluated while resolving
+        if d in tuber_dynamic:
+            if recursive:
+                dynamic_props[d] = resolve_property(obj, d)
+            else:
+                dynamic_props.append(d)
+            continue
+
         attr = getattr(obj, d)
         if recursive:
             if getattr(attr, "__tuber_object__", False):
@@ -254,7 +312,7 @@ class TuberContainer:
     """Container for grouping objects"""
 
     __tuber_object__ = True
-    __tuber_exclude__ = ["_items"]
+    __tuber_exclude__ = ["_items", "_keys"]
 
     def __init__(self, items):
         """
@@ -271,6 +329,14 @@ class TuberContainer:
 
         self._items = items
 
+    def _keys(self, keys=None):
+        """Return the given item keys, or the keys of every item if None."""
+        if keys is not None:
+            return keys
+        if isinstance(self._items, list):
+            return range(len(self._items))
+        return list(self._items)
+
     def tuber_call(self, method, *args, **kwargs):
         """Call a method on every container item.
 
@@ -279,13 +345,34 @@ class TuberContainer:
         method call to only the given set of container items.
         """
         keys = kwargs.pop("keys", None)
-        if keys is None:
-            if isinstance(self._items, list):
-                keys = range(len(self))
-            else:
-                keys = self.keys()
+        return [getattr(self[k], method)(*args, **kwargs) for k in self._keys(keys)]
 
-        return [getattr(self[k], method)(*args, **kwargs) for k in keys]
+    def tuber_get(self, name, keys=None):
+        """Get a property of every container item.
+
+        Returns a list containing the value of the given property of every item
+        in the container.  If `keys` is supplied, restrict the list to only the
+        given set of container items.
+        """
+        return [get_property(self[k], name) for k in self._keys(keys)]
+
+    def tuber_set(self, name, *value, keys=None, values=None):
+        """Set a dynamic property of every container item.
+
+        Pass either a single `value`, to set the same value on every item in
+        the container, or `values`, a list with one value per item.  If `keys`
+        is supplied, restrict the assignment to only the given set of container
+        items.
+        """
+        if len(value) + (values is not None) != 1:
+            raise TypeError("Pass exactly one of value or values")
+        keys = self._keys(keys)
+        if values is None:
+            values = value * len(keys)
+        elif len(values) != len(keys):
+            raise ValueError(f"Got {len(values)} values for {len(keys)} items")
+        for k, v in zip(keys, values):
+            set_property(self[k], name, v)
 
     def tuber_meta(self):
         """
@@ -639,7 +726,11 @@ class RequestHandler:
             obj = self.registry[objname]
 
             methodname = request["method"]
-            method = getattr(obj, methodname)
+            if methodname in property_methods and not hasattr(obj, methodname):
+                # Property access, for objects that don't define their own
+                method = functools.partial(property_methods[methodname], obj)
+            else:
+                method = getattr(obj, methodname)
 
             args = request.get("args", [])
             if not isinstance(args, list):

@@ -76,6 +76,12 @@ class Thermometer:
 
     __tuber_object__ = True
 
+    # Dynamic properties are read from the server on every client access, and
+    # are the only properties clients can set.  Any other attribute, such as
+    # label, is static: clients cache its value when they first connect, and
+    # can't change it.
+    __tuber_dynamic__ = {"offset", "temperature"}
+
     def __init__(self, label="thermometer", offset=0.0):
         self.label = label
         self.offset = offset
@@ -84,6 +90,13 @@ class Thermometer:
         """Return the current temperature (°C), including calibration offset."""
         raw = 20.0 + random.gauss(0, 0.5)
         return raw + self.offset
+
+    # A @property can be dynamic too.  This one has no setter, so it's
+    # read-only for clients.
+    @property
+    def temperature(self):
+        """The current temperature (°C), including calibration offset."""
+        return self.read_temperature()
 
     def set_calibration(self, offset: float):
         """Set the calibration offset (°C) and return the new value."""
@@ -129,7 +142,8 @@ registry = {
     # index into it like a list: client.sensors[2].read_temperature()
     # Because the description is shared, static properties (e.g. label)
     # are taken from the first item; per-item state must be read through
-    # methods.  Use TuberContainer for heterogeneous items.
+    # methods or dynamic properties (e.g. offset).  Use TuberContainer for
+    # heterogeneous items.
     "sensors": TuberArray([Thermometer(label="array-sensor", offset=round(0.1 * i, 1)) for i in range(4)]),
 }
 

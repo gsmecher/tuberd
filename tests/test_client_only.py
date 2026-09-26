@@ -100,3 +100,30 @@ async def test_basic_resolve(canned_server, cls, response, descriptions):
 
     if isinstance(obj, tuber.SimpleTuberObject) and not isinstance(obj, tuber.TuberObject):
         obj.close()
+
+
+@pytest.mark.parametrize("cls", [tuber.TuberObject, tuber.SimpleTuberObject])
+@pytest.mark.asyncio
+async def test_container_tuber_get_old_server(canned_server, cls):
+    """
+    tuberd v0.18 and older have no container tuber_get method, so the client
+    collects the properties that the container's items cached at resolve.
+    """
+
+    responses, host = canned_server
+    item = {"__doc__": None, "methods": {}, "properties": {"some_property": 42}, "objects": {}}
+    container = {"__doc__": None, "methods": {"tuber_call": METHOD}, "properties": {}, "objects": {}}
+    responses.append(json.dumps([{"result": dict(container, keys=["a", "b"], values=[item, item])}]))
+
+    obj = cls("ObjectNameIsIgnored", hostname=host)
+    await resolve(obj)
+    assert not responses, "every canned response was consumed"
+
+    # No request is made: the canned server has no response left to give
+    if isinstance(obj, tuber.TuberObject):
+        assert await obj.tuber_get("some_property") == [42, 42]
+        assert await obj.tuber_get("some_property", keys=["b"]) == [42]
+    else:
+        assert obj.tuber_get("some_property") == [42, 42]
+        assert obj.tuber_get("some_property", keys=["b"]) == [42]
+        obj.close()

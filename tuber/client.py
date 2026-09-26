@@ -135,6 +135,10 @@ def resolve_simple(
     return instance
 
 
+# Default for optional arguments that may legitimately be None
+_UNSET = object()
+
+
 def attribute_blacklisted(name: str):
     """
     Keep Python-specific attributes from being treated as potential remote
@@ -1076,6 +1080,7 @@ class SimpleTuberObject:
         self._tuber_resolved = False
         self._tuber_meta = None
         self._tuber_methods = {}
+        self._tuber_dynamic = frozenset()
         if parent is None:
             assert hostname, "Argument 'hostname' required"
             self._tuber_host = hostname
@@ -1130,11 +1135,29 @@ class SimpleTuberObject:
         if methods is not None and name in methods:
             return types.MethodType(methods[name], self)
 
+        # Dynamic properties are read from the server on each access
+        if name in self.__dict__.get("_tuber_dynamic", ()):
+            return self.tuber_get(name)
+
         # Useful hint
         raise AttributeError(f"'{self._tuber_objname}' has no attribute '{name}'.  Did you run tuber_resolve()?")
 
+    def __setattr__(self, name: str, value):
+        # Assigning a dynamic property sets it on the server, and static
+        # properties are read-only
+        if name in self.__dict__.get("_tuber_dynamic", ()):
+            self.tuber_set(name, value)
+        elif (meta := self.__dict__.get("_tuber_meta")) is not None and name in meta["properties"]:
+            raise AttributeError(
+                f"Property '{name}' is static, and can't be set. "
+                "List it in the server object's __tuber_dynamic__ to make it settable."
+            )
+        else:
+            super().__setattr__(name, value)
+
     def __dir__(self):
-        return sorted(set(super().__dir__()) | set(self.__dict__.get("_tuber_methods", ())))
+        remote = set(self.__dict__.get("_tuber_methods", ())) | self.__dict__.get("_tuber_dynamic", set())
+        return sorted(set(super().__dir__()) | remote)
 
     def __enter__(self):
         return self
@@ -1175,6 +1198,49 @@ class SimpleTuberObject:
             return iter(self._items)
         except AttributeError:
             raise TypeError(f"'{self._tuber_objname}' object is not iterable")
+
+    def _tuber_invoke(self, method: str, *args, **kwargs):
+        """Call a remote method of this object by name and return its result."""
+        ctx = self.tuber_context(return_exceptions=False)
+        return getattr(ctx, method)(*args, **kwargs).result()
+
+    def _tuber_value(self, value):
+        """Return a locally known value as a remote call would return it."""
+        return value
+
+    def tuber_get(self, name: str, keys: list[str | int] | None = None):
+        """Get a property, static or dynamic, from the server.
+
+        For a container, return a list of the property of every item, or only
+        of the items with the given ``keys``, in one request.
+        """
+        # tuberd v0.18 and older have no tuber_get method: fall back to the
+        # (static) properties that the container's items cached at resolve
+        items = self.__dict__.get("_items")
+        if items is not None and "tuber_get" not in self._tuber_methods:
+            if keys is None:
+                keys = range(len(items)) if isinstance(items, list) else items.keys()
+            return self._tuber_value([getattr(items[k], name) for k in keys])
+
+        kwargs = {} if keys is None else {"keys": keys}
+        return self._tuber_invoke("tuber_get", name, **kwargs)
+
+    def tuber_set(self, name: str, value=_UNSET, keys: list[str | int] | None = None, *, values=None):
+        """Set a dynamic property on the server.
+
+        For a container, set the property of every item, or only of the items
+        with the given ``keys``, in one request.  Pass either ``value``, to set
+        the same value on every item, or ``values``, a sequence with one value
+        per item.
+        """
+        if (value is _UNSET) == (values is None):
+            raise TypeError("Pass exactly one of value or values")
+        args = [name] if value is _UNSET else [name, value]
+        kwargs = {} if keys is None else {"keys": keys}
+        if values is not None:
+            # numpy arrays: numpy scalars can't be encoded, so use Python values
+            kwargs["values"] = values.tolist() if hasattr(values, "tolist") else list(values)
+        return self._tuber_invoke("tuber_set", *args, **kwargs)
 
     def object_factory(self, objname: str):
         """Construct a child TuberObject for the given resource name.
@@ -1251,6 +1317,9 @@ class SimpleTuberObject:
         if doc := meta.get("__doc__", None):
             self.__doc__ = meta["__doc__"]
 
+        # dynamic properties are read and written on the server on each access
+        self._tuber_dynamic = frozenset(meta.setdefault("dynamic_properties", {}))
+
         # keep track of existing remote attributes
         if self._tuber_meta is None:
             self._tuber_meta = {"objects": [], "methods": [], "properties": [], "container": False}
@@ -1262,8 +1331,8 @@ class SimpleTuberObject:
         for k in set(self._tuber_meta["objects"]) - set(objects):
             delattr(self, k)
         for k, v in objects.items():
-            obj = self._resolve_object(attr=k, meta=v)
-            setattr(self, k, obj)
+            # (assigned directly, bypassing the checks in __setattr__)
+            self.__dict__[k] = self._resolve_object(attr=k, meta=v)
 
         # methods (as above, setdefault can't be used)
         methods = meta["methods"] = meta.get("methods") or {}
@@ -1297,14 +1366,14 @@ class SimpleTuberObject:
             # (unset means True, as it does for contexts)
             convert = self._convert_json is None or self._convert_json
             for k, v in properties.items():
-                setattr(self, k, recurse(v) if convert else v)
+                self.__dict__[k] = recurse(v) if convert else v
 
         # Discard any container attributes from a previous resolve before
         # rebuilding: changes may have been structural (e.g. dict-like to
         # list-like)
         if self._tuber_meta["container"]:
             self.__dict__.pop("_items", None)
-            for k in ("keys", "values", "items", "tuber_get"):
+            for k in ("keys", "values", "items"):
                 self._tuber_methods.pop(k, None)
 
         if (values := meta.setdefault("values", None)) is not None:
@@ -1333,22 +1402,6 @@ class SimpleTuberObject:
                 self._tuber_methods["keys"] = lambda o: o._items.keys()
                 self._tuber_methods["values"] = lambda o: o._items.values()
                 self._tuber_methods["items"] = lambda o: o._items.items()
-
-            def tuber_get(self, name: str, keys: list[str | int] | None = None):
-                """Get a property of every container item.
-
-                Return a list of property values for each item.  If ``keys`` is
-                supplied, return only the values corresponding to the given set
-                of container items.
-                """
-                if keys is None:
-                    if isinstance(self._items, list):
-                        keys = range(len(self._items))
-                    else:
-                        keys = self._items.keys()
-                return [getattr(self._items[k], name) for k in keys]
-
-            self._tuber_methods["tuber_get"] = tuber_get
 
         # store names of resolved attributes
         self._tuber_meta = {
@@ -1399,6 +1452,27 @@ class TuberObject(SimpleTuberObject):
                 meta[k] = {n: described[n] for n in meta[k]}
 
         self._resolve_meta(meta)
+
+    def _tuber_invoke(self, method: str, *args, **kwargs):
+        """Queue a call to a remote method of this object by name, and return
+        a future that sends it when awaited."""
+        ctx = self.tuber_context(return_exceptions=False)
+        return getattr(ctx, method)(*args, **kwargs)
+
+    def _tuber_value(self, value):
+        """Return a locally known value as a remote call would return it: in
+        a future, to be awaited."""
+        future = asyncio.get_running_loop().create_future()
+        future.set_result(value)
+        return future
+
+    def __setattr__(self, name: str, value):
+        if name in self.__dict__.get("_tuber_dynamic", ()):
+            raise TuberStateError(
+                f"Cannot assign property '{name}' of an async object. "
+                f"Use `await obj.tuber_set({name!r}, value)` instead."
+            )
+        super().__setattr__(name, value)
 
     @staticmethod
     def _resolve_method(name: str, meta: dict):
