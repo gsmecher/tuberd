@@ -34,6 +34,12 @@ if "CMAKE_ARGS" in os.environ:
     cmake_args += [item for item in os.environ["CMAKE_ARGS"].split(" ") if item]
 
 # sensible defaults
+if not any(["Python_EXECUTABLE" in a for a in cmake_args]):
+    # Build against this interpreter. The prefix alone is ambiguous where
+    # several interpreters share it (e.g. python3.14 and free-threaded
+    # python3.14t on manylinux), and FindPython may pick the wrong one.
+    cmake_args += [f"-DPython_EXECUTABLE={sys.executable}"]
+
 if not any(["Python_ROOT_DIR" in a for a in cmake_args]):
     pyroot = sysconfig.get_config_var("prefix")
     cmake_args += [f"-DPython_ROOT_DIR={pyroot}"]

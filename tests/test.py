@@ -10,6 +10,9 @@ import numpy as np
 import os
 import pytest
 import requests
+import sys
+import sysconfig
+import time
 import warnings
 import weakref
 import tuber
@@ -115,13 +118,25 @@ class WarningsClass:
 
         return True
 
+    def delayed_warning(self, warning_text, delay=0):
+        # Unlike the methods above, leave the warning filters alone: resetting
+        # them would hide whether the server reports repeated warnings.
+        time.sleep(delay)
+        warnings.warn(warning_text)
+        return True
+
 
 class SlowObject:
     def sleep(self, seconds):
-        import time
-
         time.sleep(seconds)
         return seconds
+
+
+class Runtime:
+    def gil_enabled(self):
+        # sys._is_gil_enabled() is new in Python 3.13; older interpreters
+        # always have a GIL.
+        return getattr(sys, "_is_gil_enabled", lambda: True)()
 
 
 # This module doubles as the registry file served by the tuberd fixture
@@ -149,6 +164,7 @@ registry = {
     "NumPy": NumPy(),
     "Warnings": WarningsClass(),
     "SlowObject": SlowObject(),
+    "Runtime": Runtime(),
     "Wrapper": tm.Wrapper(),
 }
 
@@ -295,6 +311,76 @@ def test_numpy_types(tuber_call):
 @pytest.mark.orjson
 def test_double_vector(tuber_call):
     assert tuber_call(object="Wrapper", method="increment", args=[[1, 2, 3, 4, 5]]) == Succeeded([2, 3, 4, 5, 6])
+
+
+@pytest.mark.skipif(not sysconfig.get_config_var("Py_GIL_DISABLED"), reason="Requires a free-threaded Python build")
+def test_gil_disabled(tuber_call):
+    """Every extension module the server loads leaves the GIL disabled."""
+    assert tuber_call(object="Runtime", method="gil_enabled") == Succeeded(False)
+
+
+# tuber_call's session keeps at most 10 connections (urllib3's default); more
+# concurrent requests would still work, but discard connections with a warning.
+MAX_PARALLEL_REQUESTS = 10
+
+
+def test_parallel_requests(tuber_call):
+    """Requests issued in parallel each get their own, correct result."""
+
+    def call(i):
+        return tuber_call(object="Wrapper", method="increment", args=[[i] * 100])
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_PARALLEL_REQUESTS) as pool:
+        results = list(pool.map(call, range(200)))
+
+    assert results == [Succeeded([i + 1] * 100) for i in range(200)]
+
+
+def test_cpp_lock_under_concurrency(tuber_call):
+    """Concurrent calls into C++ that updates shared state under a lock lose no
+    updates. Wrapper.count() releases the GIL, so the calls overlap in C++
+    whether or not the server is free-threaded."""
+    calls, steps = 64, 1000
+
+    assert tuber_call(object="Wrapper", method="reset_counter") == Succeeded()
+
+    def call(_):
+        return tuber_call(object="Wrapper", method="count", args=[steps])
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_PARALLEL_REQUESTS) as pool:
+        results = list(pool.map(call, range(calls)))
+
+    assert results == [Succeeded()] * calls
+    assert tuber_call(object="Wrapper", method="counter") == Succeeded(calls * steps)
+
+    # Otherwise the lock was never contended, and the test proves nothing
+    assert tuber_call(object="Wrapper", method="max_in_flight")["result"] > 1
+
+
+def test_overlapping_request_warnings(tuber_call):
+    """Each request gets its own warnings back, even when overlapping requests
+    finish in a different order than they started."""
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        # A starts first and finishes first; B warns after A has finished
+        a = pool.submit(tuber_call, object="SlowObject", method="sleep", args=[0.2])
+        time.sleep(0.1)
+        b = pool.submit(tuber_call, object="Warnings", method="delayed_warning", args=["B's warning", 0.3])
+
+        assert a.result() == Succeeded(0.2)
+        assert b.result() == Succeeded(True, warnings=["B's warning"])
+
+    # and a request made afterwards still reports its own warnings
+    assert tuber_call(object="Warnings", method="delayed_warning", args=["C's warning"]) == Succeeded(
+        True, warnings=["C's warning"]
+    )
+
+
+def test_repeated_request_warnings(tuber_call):
+    """A warning raised again from the same place is reported by each request."""
+    for _ in range(3):
+        assert tuber_call(object="Warnings", method="delayed_warning", args=["Repeated"]) == Succeeded(
+            True, warnings=["Repeated"]
+        )
 
 
 def test_unserializable(tuber_call):
@@ -829,6 +915,52 @@ def test_tuberpy_simple_context_timeout(accept_types, tuberd_host):
         assert r1.result() == 0.1
 
 
+def test_tuberpy_simple_warnings_after_timeout(accept_types, tuberd_host):
+    """Warnings still reach the caller when the response arrives after a timed-out
+    wait, and the batch is resolved in the background."""
+    s = resolve_simple(tuberd_host, accept_types=accept_types)
+
+    with pytest.warns(match="This is a warning"):
+        with s.tuber_context() as ctx:
+            r1 = ctx.Warnings.single_warning("This is a warning")
+            r2 = ctx.SlowObject.sleep(0.5)
+            with pytest.raises(concurrent.futures.TimeoutError):
+                r2.result(timeout=0.1)
+
+            assert r1.result() is True
+
+
+@pytest.mark.asyncio
+async def test_tuberpy_async_warnings_after_timeout(accept_types, tuberd_host):
+    """Warnings reach the awaiting task when the batch was flushed in a
+    background task (here, by a timed-out wait on another call)."""
+    s = await tuber.resolve(tuberd_host, accept_types=accept_types)
+
+    async with s.tuber_context() as ctx:
+        r1 = ctx.Warnings.single_warning("This is a warning")
+        r2 = ctx.SlowObject.sleep(0.5)
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(r2, timeout=0.1)
+
+        with pytest.warns(match="This is a warning"):
+            assert (await r1) is True
+
+
+def test_tuberpy_simple_warnings_emitted_once(accept_types, tuberd_host):
+    """A response's warnings are emitted once, however often it's collected."""
+    s = resolve_simple(tuberd_host, accept_types=accept_types)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        with s.tuber_context() as ctx:
+            ctx.Warnings.single_warning("This is a warning")
+            response = ctx.send()
+            assert ctx.receive(response)[0] is True
+            assert ctx.receive(response)[0] is True
+
+    assert [str(w.message) for w in caught] == ["This is a warning"]
+
+
 # RFC 5737 TEST-NET-1: routable but unreachable, reliably triggers connect timeouts.
 UNREACHABLE_HOST = "192.0.2.1:80"
 
@@ -930,9 +1062,14 @@ def test_tuberpy_simple_close(accept_types, tuberd_host):
 
 @pytest.mark.parametrize("objname", ["Wrapper", "ObjectDict", "ObjectList", "Container", None])
 @pytest.mark.asyncio
-async def test_tuberpy_freed_without_gc(resolve, objname):
+async def test_tuberpy_freed_without_gc(request, resolve, objname):
     """Objects hold no reference cycles, so they (and the simple client's
     connection pool) are freed as soon as they're no longer referenced."""
+    if sysconfig.get_config_var("Py_GIL_DISABLED") and "simple" in request.node.callspec.id:
+        # Biased reference counting keeps the last response (created on the
+        # session's worker thread), and through it the object, alive until
+        # that thread next runs or the garbage collector does.
+        pytest.skip("Free-threaded Python frees simple clients only once their worker thread runs")
     gc.collect()
     gc.disable()
     try:

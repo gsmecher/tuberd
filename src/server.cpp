@@ -43,7 +43,10 @@ public:
 private:
 	std::unique_ptr<httplib::Server> svr_;
 	int port_ = -1;
-	bool served_ = false;
+
+	/* Atomic so that, on free-threaded builds (where concurrent calls into
+	 * this object aren't serialized by the GIL), only one serve() can run. */
+	std::atomic<bool> served_ = false;
 
 	/* Distinguishes a requested stop (which makes listen_after_bind()
 	 * return false if it lands before the accept loop starts) from a
@@ -101,6 +104,9 @@ Server::Server(py::object handler, int port, py::object webroot, int max_age)
 	 * tuber.server package), with hot path dispatch to C++ handled by the
 	 * user. */
 	svr_->Post("/tuber", [handler](const httplib::Request& req, httplib::Response& res) {
+		/* cpp-httplib dispatches requests from a thread pool. With a
+		 * GIL, C++ code bound in user modules never runs concurrently;
+		 * on free-threaded builds it does, and must be thread-safe. */
 		py::gil_scoped_acquire acquire;
 
 		try {
@@ -116,8 +122,8 @@ Server::Server(py::object handler, int port, py::object webroot, int max_age)
 
 			/* The response path is kept zero-copy using a string
 			 * view (a raw buffer for cbor2/orjson, or utf-8 for
-			 * json). This is legitimate until the GIL lock is
-			 * released. */
+			 * json). The view is valid for as long as a reference
+			 * to the (immutable) body object is held. */
 			py::object body = resp[1];
 			auto view = body.cast<std::string_view>();
 
@@ -227,9 +233,8 @@ void Server::serve(bool handle_sigint)
 {
 	/* cpp-httplib closes the listening socket when the accept loop exits,
 	 * so a server cannot be resumed. */
-	if (served_)
+	if (served_.exchange(true))
 		throw std::runtime_error("Tuber server cannot be restarted after it has stopped");
-	served_ = true;
 
 	/* A process-wide signal handler only belongs to the main thread
 	 * (Python's signal module enforces the same rule), so callers serving
@@ -269,7 +274,14 @@ void Server::stop()
 }
 
 
+/* Free-threaded builds need pybind11 >= 2.13, which can declare that this
+ * module doesn't need the GIL; older releases (e.g. distribution packages)
+ * still build for GIL-enabled Python. */
+#if PYBIND11_VERSION_HEX >= 0x020D0000
+PYBIND11_MODULE(_tuber_runtime, m, py::mod_gil_not_used()) {
+#else
 PYBIND11_MODULE(_tuber_runtime, m) {
+#endif
 	m.doc() = "Tuber server runtime library";
 
 	py::class_<Server>(m, "Server",
