@@ -4,6 +4,8 @@ Example tuber server exposing simulated devices.
 
 Run as:
     python example_server.py -p 8080
+
+Use -p 0 to pick any free port; the port in use is printed on startup.
 """
 
 import random
@@ -133,6 +135,11 @@ registry = {
 
 
 if __name__ == "__main__":
-    from tuber.server import main
+    from tuber.server import Server, parse_args
 
-    main(registry)
+    # tuber.server.main(registry) would do the same, but constructing the
+    # Server here gives access to the port it bound, which is only known
+    # after binding when -p 0 is used.
+    server = Server(**vars(parse_args(registry=registry)))
+    print(f"Serving on port {server.port}", flush=True)
+    server.serve()

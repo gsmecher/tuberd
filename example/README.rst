@@ -19,6 +19,17 @@ Run the server in its own shell.  The ``-p`` flag sets the port::
 
   python example_server.py -p 8080
 
+The server prints the port it's running on.  Pass ``-p 0`` to use any free
+port, for example when 8080 is already taken::
+
+  python example_server.py -p 0
+  Serving on port 52614
+
+Both client scripts connect to port 8080 by default; pass ``-p`` to use
+another::
+
+  python example_client.py -p 52614
+
 The registry is defined at module level, so ``tuberd`` can also load the
 file directly::
 
