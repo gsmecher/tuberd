@@ -116,19 +116,23 @@ class Thermometer:
         return 20.0 + self.offset + np.random.normal(0, 0.5, n)
 
 
+# The registry is defined at module level so that other code can import it
+# (see example_embedded.py), and so that tuberd can load this file directly:
+#     tuberd -r example_server.py -p 8080
+registry = {
+    "driver": DeviceDriver(label="main-board"),
+    "thermometer": Thermometer(label="ambient", offset=0.0),
+    # A TuberArray exposes a list (or dict) of identically-typed objects.
+    # The server sends one shared description for all items, and clients
+    # index into it like a list: client.sensors[2].read_temperature()
+    # Because the description is shared, static properties (e.g. label)
+    # are taken from the first item; per-item state must be read through
+    # methods.  Use TuberContainer for heterogeneous items.
+    "sensors": TuberArray([Thermometer(label="array-sensor", offset=round(0.1 * i, 1)) for i in range(4)]),
+}
+
+
 if __name__ == "__main__":
     from tuber.server import main
-
-    registry = {
-        "driver": DeviceDriver(label="main-board"),
-        "thermometer": Thermometer(label="ambient", offset=0.0),
-        # A TuberArray exposes a list (or dict) of identically-typed objects.
-        # The server sends one shared description for all items, and clients
-        # index into it like a list: client.sensors[2].read_temperature()
-        # Because the description is shared, static properties (e.g. label)
-        # are taken from the first item; per-item state must be read through
-        # methods.  Use TuberContainer for heterogeneous items.
-        "sensors": TuberArray([Thermometer(label="array-sensor", offset=round(0.1 * i, 1)) for i in range(4)]),
-    }
 
     main(registry)
