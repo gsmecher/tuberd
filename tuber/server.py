@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 
+import contextlib
+import contextvars
 import inspect
 import os
+import threading
 import warnings
 import functools
 import sys
@@ -12,6 +15,75 @@ from .codecs import Codecs
 from . import schema
 
 __all__ = ["TuberRegistry", "TuberContainer", "TuberArray", "run", "main"]
+
+
+class RequestWarnings:
+    """Collects the warnings raised while handling each request.
+
+    Warnings raised by a registry method are returned with its response.
+    ``warnings.catch_warnings()`` can't collect them safely: where warnings
+    state is process-wide (Python builds with a GIL, by default), it saves that
+    state on entry and restores it on exit, so overlapping requests that finish
+    out of order restore each other's stale state, losing warnings and leaving
+    a dead recorder installed.
+
+    Instead, a single hook, installed once per process, hands each warning to
+    the recorder of the request that raised it, if any; ``capture()`` sets that
+    recorder for the duration of a request.
+    """
+
+    def __init__(self):
+        self._recorder = contextvars.ContextVar("tuber_request_warnings", default=None)
+        self._lock = threading.Lock()
+        self._installed = False
+
+    def _install(self):
+        """Install the hook, once, on first use (so that importing this module
+        leaves the warnings module alone)."""
+        with self._lock:
+            if self._installed:
+                return
+
+            # The warnings module has no public hook that works here: it calls
+            # the public showwarning() only while no catch_warnings(record=True)
+            # is active anywhere in the process (pytest wraps every test in
+            # one), and saves and restores it besides. Its private
+            # _showwarnmsg(), which shows every warning that passes the
+            # filters, is left alone by catch_warnings(), and its docstring
+            # invites replacing it.
+            show = warnings._showwarnmsg
+
+            def record_or_show(msg):
+                recorded = self._recorder.get()
+                if recorded is None:
+                    show(msg)
+                else:
+                    recorded.append(msg)
+
+            warnings._showwarnmsg = record_or_show
+            self._installed = True
+
+    @contextlib.contextmanager
+    def capture(self):
+        """Collect the warnings raised in this context (e.g. by one request)
+        into the list this yields."""
+        self._install()
+
+        # Report warnings again even if they were already shown once from the
+        # same place, as catch_warnings() does: resetting the filters'
+        # once-per-location registry has no public API either.
+        warnings._filters_mutated()
+
+        recorded = []
+        token = self._recorder.set(recorded)
+        try:
+            yield recorded
+        finally:
+            self._recorder.reset(token)
+
+
+# One for the process, since the hook is process-wide
+request_warnings = RequestWarnings()
 
 
 # request handling
@@ -405,8 +477,8 @@ class RequestHandler:
 
         import jsonschema
 
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
+        # discard any warnings jsonschema raises
+        with request_warnings.capture():
             jsonschema.validate(data, schema_type)
 
     def encode(self, data, fmt=None):
@@ -580,7 +652,7 @@ class RequestHandler:
         except Exception as e:
             return error_response(e)
 
-        with warnings.catch_warnings(record=True) as wlist:
+        with request_warnings.capture() as wlist:
             try:
                 response = result_response(method(*args, **kwargs))
             except Exception:

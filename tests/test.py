@@ -10,6 +10,7 @@ import numpy as np
 import os
 import pytest
 import requests
+import time
 import warnings
 import weakref
 import tuber
@@ -115,11 +116,16 @@ class WarningsClass:
 
         return True
 
+    def delayed_warning(self, warning_text, delay=0):
+        # Unlike the methods above, leave the warning filters alone: resetting
+        # them would hide whether the server reports repeated warnings.
+        time.sleep(delay)
+        warnings.warn(warning_text)
+        return True
+
 
 class SlowObject:
     def sleep(self, seconds):
-        import time
-
         time.sleep(seconds)
         return seconds
 
@@ -295,6 +301,32 @@ def test_numpy_types(tuber_call):
 @pytest.mark.orjson
 def test_double_vector(tuber_call):
     assert tuber_call(object="Wrapper", method="increment", args=[[1, 2, 3, 4, 5]]) == Succeeded([2, 3, 4, 5, 6])
+
+
+def test_overlapping_request_warnings(tuber_call):
+    """Each request gets its own warnings back, even when overlapping requests
+    finish in a different order than they started."""
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        # A starts first and finishes first; B warns after A has finished
+        a = pool.submit(tuber_call, object="SlowObject", method="sleep", args=[0.2])
+        time.sleep(0.1)
+        b = pool.submit(tuber_call, object="Warnings", method="delayed_warning", args=["B's warning", 0.3])
+
+        assert a.result() == Succeeded(0.2)
+        assert b.result() == Succeeded(True, warnings=["B's warning"])
+
+    # and a request made afterwards still reports its own warnings
+    assert tuber_call(object="Warnings", method="delayed_warning", args=["C's warning"]) == Succeeded(
+        True, warnings=["C's warning"]
+    )
+
+
+def test_repeated_request_warnings(tuber_call):
+    """A warning raised again from the same place is reported by each request."""
+    for _ in range(3):
+        assert tuber_call(object="Warnings", method="delayed_warning", args=["Repeated"]) == Succeeded(
+            True, warnings=["Repeated"]
+        )
 
 
 def test_unserializable(tuber_call):
