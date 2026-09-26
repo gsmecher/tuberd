@@ -5,18 +5,24 @@ Example synchronous tuber client.
 Start the example server first:
     python example_server.py -p 8080
 
-Then run this script:
-    python example_client.py
+Then run this script, passing the port the server printed if it isn't 8080:
+    python example_client.py [-p PORT]
 """
 
+import argparse
 import warnings
 
 import tuber
 
+parser = argparse.ArgumentParser(description="Example synchronous tuber client")
+parser.add_argument("-p", "--port", type=int, default=8080, help="Port the example server is running on")
+args = parser.parse_args()
+host = f"localhost:{args.port}"
+
 # Connect to the server.  resolve_simple() fetches metadata from the registry
 # and returns a proxy whose attributes mirror the server's registered objects.
 # The timeout (in seconds) applies to every HTTP request made by this client.
-client = tuber.resolve_simple("localhost:8080", timeout=5.0)
+client = tuber.resolve_simple(host, timeout=5.0)
 
 # ── DeviceDriver ──────────────────────────────────────────────────────────────
 
@@ -43,7 +49,7 @@ print(f"All state: label={state.label!r}, button={state.button}, knob={state.kno
 # Pass convert_json=False to get plain dicts instead of TuberResult objects.
 # A client used as a context manager closes its HTTP connections on exit, which
 # suits short-lived clients like this one.
-with tuber.resolve_simple("localhost:8080", convert_json=False) as plain_client:
+with tuber.resolve_simple(host, convert_json=False) as plain_client:
     state_dict = plain_client.driver.get_all()
 print("As plain dict:", state_dict)
 
@@ -177,7 +183,7 @@ print("All temperatures:", [f"{t:.2f}" for t in temps])
 
 print("\n=== CBOR and numpy ===")
 
-with tuber.resolve_simple("localhost:8080", accept_types=["application/cbor"]) as cbor_client:
+with tuber.resolve_simple(host, accept_types=["application/cbor"]) as cbor_client:
     samples = cbor_client.thermometer.read_samples(8)
 print(f"Samples: {type(samples).__name__} {samples.dtype} {samples.shape}")
 print(f"Mean: {samples.mean():.2f} °C")

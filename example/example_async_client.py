@@ -5,18 +5,19 @@ Example asynchronous tuber client.
 Start the example server first:
     python example_server.py -p 8080
 
-Then run this script:
-    python example_async_client.py
+Then run this script, passing the port the server printed if it isn't 8080:
+    python example_async_client.py [-p PORT]
 """
 
+import argparse
 import asyncio
 import tuber
 
 
-async def main():
+async def main(host):
     # Connect to the server asynchronously.  The returned proxy works like the
     # synchronous one except that method calls are coroutines (use ``await``).
-    client = await tuber.resolve("localhost:8080", timeout=5.0)
+    client = await tuber.resolve(host, timeout=5.0)
 
     # ── DeviceDriver ──────────────────────────────────────────────────────────
 
@@ -155,11 +156,15 @@ async def main():
 
     print("\n=== CBOR and numpy ===")
 
-    cbor_client = await tuber.resolve("localhost:8080", accept_types=["application/cbor"])
+    cbor_client = await tuber.resolve(host, accept_types=["application/cbor"])
     samples = await cbor_client.thermometer.read_samples(8)
     print(f"Samples: {type(samples).__name__} {samples.dtype} {samples.shape}")
     print(f"Mean: {samples.mean():.2f} °C")
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    parser = argparse.ArgumentParser(description="Example asynchronous tuber client")
+    parser.add_argument("-p", "--port", type=int, default=8080, help="Port the example server is running on")
+    args = parser.parse_args()
+
+    asyncio.run(main(f"localhost:{args.port}"))
