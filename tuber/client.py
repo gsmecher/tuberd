@@ -578,7 +578,9 @@ class SimpleContext:
                 for f in futures:
                     f.cancel()
                 raise TuberError(f"Unexpected response content type: {content_type}")
-            json_out = AcceptTypes[content_type](raw_out, resp.apparent_encoding, convert=convert_json)
+            # resp.encoding comes from the Content-Type charset (None if absent;
+            # the codecs then assume UTF-8).
+            json_out = AcceptTypes[content_type](raw_out, resp.encoding, convert=convert_json)
 
         response.tuber_results = self._parse_json(json_out, futures, convert_json, return_exceptions)
         return response.tuber_results

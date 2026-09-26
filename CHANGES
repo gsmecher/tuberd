@@ -31,6 +31,9 @@ v0.18.6
 - The server no longer caps request bodies (cpp-httplib's default was 100 MB,
   beyond which a request failed with an empty 413 or a broken connection).
 
+- The synchronous client no longer runs charset detection over every response
+  body, which made large responses take tens of seconds to receive.
+
 v0.18.5
 =======
 
