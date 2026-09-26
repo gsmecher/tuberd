@@ -319,18 +319,42 @@ def test_gil_disabled(tuber_call):
     assert tuber_call(object="Runtime", method="gil_enabled") == Succeeded(False)
 
 
-def test_parallel_requests(tuberd_host):
+# tuber_call's session keeps at most 10 connections (urllib3's default); more
+# concurrent requests would still work, but discard connections with a warning.
+MAX_PARALLEL_REQUESTS = 10
+
+
+def test_parallel_requests(tuber_call):
     """Requests issued in parallel each get their own, correct result."""
-    uri = f"http://{tuberd_host}/tuber"
 
     def call(i):
-        r = requests.post(uri, json=dict(object="Wrapper", method="increment", args=[[i] * 100]))
-        return r.json()
+        return tuber_call(object="Wrapper", method="increment", args=[[i] * 100])
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=16) as pool:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_PARALLEL_REQUESTS) as pool:
         results = list(pool.map(call, range(200)))
 
     assert results == [Succeeded([i + 1] * 100) for i in range(200)]
+
+
+def test_cpp_lock_under_concurrency(tuber_call):
+    """Concurrent calls into C++ that updates shared state under a lock lose no
+    updates. Wrapper.count() releases the GIL, so the calls overlap in C++
+    whether or not the server is free-threaded."""
+    calls, steps = 64, 1000
+
+    assert tuber_call(object="Wrapper", method="reset_counter") == Succeeded()
+
+    def call(_):
+        return tuber_call(object="Wrapper", method="count", args=[steps])
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_PARALLEL_REQUESTS) as pool:
+        results = list(pool.map(call, range(calls)))
+
+    assert results == [Succeeded()] * calls
+    assert tuber_call(object="Wrapper", method="counter") == Succeeded(calls * steps)
+
+    # Otherwise the lock was never contended, and the test proves nothing
+    assert tuber_call(object="Wrapper", method="max_in_flight")["result"] > 1
 
 
 def test_overlapping_request_warnings(tuber_call):
