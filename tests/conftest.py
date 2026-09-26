@@ -36,19 +36,22 @@ def tuberd_host(tuberd):
     return f"localhost:{tuberd.port}"
 
 
-@pytest.fixture(scope="module", autouse=True)
-def tuberd(request, pytestconfig):
+@pytest.fixture(scope="module")
+def tuberd(registry_file, pytestconfig):
     """
     Run a tuberd on a background thread for the duration of the module.
-    """
 
-    registry = request.node.fspath
+    Each test module says what to serve by defining a module-scoped
+    ``registry_file`` fixture returning the path of a registry Python file
+    (tests/test.py returns its own path; the example tests return
+    example/example_server.py).
+    """
 
     # Port 0 lets the kernel pick a free port, so concurrent test runs never
     # collide; the server reports the one it got.
     argv = [
         "--port=0",
-        f"--registry={registry}",
+        f"--registry={registry_file}",
         "--validate",
     ]
 
