@@ -69,6 +69,15 @@ Server::Server(py::object handler, int port, py::object webroot, int max_age)
 	 * https://brooker.co.za/blog/2024/05/09/nagle.html */
 	svr_->set_tcp_nodelay(true);
 
+	/* Don't cap request bodies. cpp-httplib defaults to 100 MB, beyond
+	 * which a request is answered with a bodiless 413 (or, if the client
+	 * is still sending, a closed connection and a broken pipe). Tuber
+	 * clients are trusted peers on a LAN sending method arguments, and
+	 * the cap is the only thing standing between a large array argument
+	 * and a confusing failure. The body is read incrementally as it
+	 * arrives, so an oversized Content-Length costs nothing up front. */
+	svr_->set_payload_max_length(std::numeric_limits<size_t>::max());
+
 	/* Bind exclusively. cpp-httplib's default is SO_REUSEPORT (on Linux and
 	 * macOS), which lets a second server bind a port that already has a
 	 * live listener and silently shares connections between the two - so a
