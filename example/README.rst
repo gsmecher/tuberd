@@ -6,6 +6,7 @@ client/server system.  The server exposes a few simulated devices — a
 ``DeviceDriver`` with a toggle button and adjustable knob, a ``Thermometer``
 with configurable calibration, and an array of identical thermometers — and
 two client scripts show how to reach them synchronously and asynchronously.
+A third script runs the server and a client together in one process.
 
 The examples use all of the optional client features, so install them with::
 
@@ -17,6 +18,11 @@ Starting the server
 Run the server in its own shell.  The ``-p`` flag sets the port::
 
   python example_server.py -p 8080
+
+The registry is defined at module level, so ``tuberd`` can also load the
+file directly::
+
+  tuberd -r example_server.py -p 8080
 
 The registry in ``example_server.py`` shows several patterns that appear in
 real drivers:
@@ -188,3 +194,32 @@ concurrently — all requests are in flight at the same time::
   )
 
   temps = await asyncio.gather(*(s.read_temperature() for s in client.sensors))
+
+Embedded server
+~~~~~~~~~~~~~~~
+
+``example_embedded.py`` runs the server and a client in the same process, so
+no separate server is needed::
+
+  python example_embedded.py
+
+This is useful for tests, notebooks, and programs that expose their own
+objects while also talking to them.  Constructing a ``tuber.server.Server``
+binds its port immediately; ``port=0`` picks any free port, and
+``server.port`` reports it.  ``serve()`` blocks until ``stop()`` is called,
+so it runs on a background thread::
+
+  import threading
+  from tuber.server import Server
+
+  server = Server(registry, port=0)
+  thread = threading.Thread(target=server.serve)
+  thread.start()
+  try:
+      with tuber.resolve_simple(f"localhost:{server.port}") as client:
+          client.driver.set_knob(42)
+  finally:
+      server.stop()
+      thread.join()
+
+A stopped server cannot be restarted; create a new ``Server`` instead.
