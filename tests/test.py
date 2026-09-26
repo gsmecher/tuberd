@@ -1241,6 +1241,16 @@ async def test_tuberpy_method(resolve):
     assert r2["b"] == "expected return value"
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("convert_json", [None, True, False])
+async def test_tuberpy_dict_property(resolve, convert_json):
+    """Static dict properties are converted like method results"""
+    s = await resolve("Types", convert_json=convert_json)
+    method_result = await tuber_result(s.dict_function())
+    assert type(s.DICT) is type(method_result)
+    assert isinstance(s.DICT, dict if convert_json is False else codecs.TuberResult)
+
+
 def test_dynamic_properties_protocol(tuber_call):
     """Static properties appear in 'properties'; dynamic ones in 'dynamic_properties'."""
     result = tuber_call(object="ObjectWithDynamicProperties")["result"]

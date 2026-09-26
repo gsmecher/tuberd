@@ -47,6 +47,10 @@ v0.18.6
   ``values=[...]`` in place of ``value`` to set one value per item. Contexts
   gain both too, for batching property reads and writes with method calls.
 
+- Dict-valued static properties are converted to ``TuberResult`` objects
+  when ``convert_json`` is left unset, matching method results. Previously
+  they were only converted if ``convert_json=True`` was passed explicitly.
+
 v0.18.5
 =======
 
