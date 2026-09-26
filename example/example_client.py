@@ -67,6 +67,43 @@ print(f"Calibrated temperature: {therm.read_temperature():.2f} °C")
 stats = therm.read_stats(n=10)
 print(f"Stats (n={stats.n}): mean={stats.mean:.2f}, min={stats.min:.2f}, max={stats.max:.2f}")
 
+# ── Dynamic properties ────────────────────────────────────────────────────────
+#
+# The thermometer lists offset and temperature in __tuber_dynamic__, so every
+# read fetches the current value from the server.  label is static: its value
+# was cached when the client connected.
+
+print("\n=== Dynamic properties ===")
+
+print(f"Temperature: {therm.temperature:.2f} °C")  # read on each access
+print("Offset:", therm.offset)
+
+# Assigning a dynamic property sets it on the server.  tuber_set() does the
+# same, and returns the value read back by the server.
+therm.offset = 0.5
+print("Offset (after assignment):", therm.offset)
+print("Offset (tuber_set):", therm.tuber_set("offset", 1.5))
+
+# Static properties can't be set, nor can a @property without a setter.
+try:
+    therm.label = "renamed"
+except AttributeError as e:
+    print("Static property:", e)
+
+try:
+    therm.tuber_set("temperature", 0.0)
+except tuber.TuberRemoteError as e:
+    print("Read-only property:", str(e).strip().splitlines()[-1])
+
+# Property reads and writes can be batched with method calls in a context.
+with therm.tuber_context() as ctx:
+    ctx.tuber_set("offset", 2.0)
+    ctx.tuber_get("temperature")
+    ctx.get_calibration()
+    results = ctx()
+print(f"Batched: offset={results[0]}, temperature={results[1]:.2f} °C, calibration={results[2]}")
+therm.offset = 1.5
+
 # ── Errors and warnings ───────────────────────────────────────────────────────
 #
 # An exception raised on the server is re-raised on the client as a
@@ -167,6 +204,14 @@ print(f"Sensor 2 temperature: {sensors[2].read_temperature():.2f} °C")
 # a single request, looping on the server.
 print("Calibrations:", sensors.tuber_call("get_calibration"))
 print("Sensors 0 and 3:", [f"{t:.2f}" for t in sensors.tuber_call("read_temperature", keys=[0, 3])])
+
+# Dynamic properties can be read and set across the array in a single request
+# too.  tuber_set() sets the same value on every item (or a subset, with
+# keys=[...]), or one value per item with values=[...].
+print("Offsets:", sensors.tuber_get("offset"))
+print("Set offsets 1 and 2:", sensors.tuber_set("offset", 0.5, keys=[1, 2]))
+print("Offsets (after set):", sensors.tuber_get("offset"))
+print("Restored offsets:", sensors.tuber_set("offset", values=[0.0, 0.1, 0.2, 0.3]))
 
 # Array items can also be batched individually by indexing into a context.
 with client.tuber_context() as ctx:
