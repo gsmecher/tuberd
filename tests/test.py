@@ -10,6 +10,9 @@ import numpy as np
 import os
 import pytest
 import requests
+import sys
+import sysconfig
+import time
 import warnings
 import weakref
 import tuber
@@ -115,13 +118,25 @@ class WarningsClass:
 
         return True
 
+    def delayed_warning(self, warning_text, delay=0):
+        # Unlike the methods above, leave the warning filters alone: resetting
+        # them would hide whether the server reports repeated warnings.
+        time.sleep(delay)
+        warnings.warn(warning_text)
+        return True
+
 
 class SlowObject:
     def sleep(self, seconds):
-        import time
-
         time.sleep(seconds)
         return seconds
+
+
+class Runtime:
+    def gil_enabled(self):
+        # sys._is_gil_enabled() is new in Python 3.13; older interpreters
+        # always have a GIL.
+        return getattr(sys, "_is_gil_enabled", lambda: True)()
 
 
 # This module doubles as the registry file served by the tuberd fixture
@@ -149,6 +164,7 @@ registry = {
     "NumPy": NumPy(),
     "Warnings": WarningsClass(),
     "SlowObject": SlowObject(),
+    "Runtime": Runtime(),
     "Wrapper": tm.Wrapper(),
 }
 
@@ -295,6 +311,76 @@ def test_numpy_types(tuber_call):
 @pytest.mark.orjson
 def test_double_vector(tuber_call):
     assert tuber_call(object="Wrapper", method="increment", args=[[1, 2, 3, 4, 5]]) == Succeeded([2, 3, 4, 5, 6])
+
+
+@pytest.mark.skipif(not sysconfig.get_config_var("Py_GIL_DISABLED"), reason="Requires a free-threaded Python build")
+def test_gil_disabled(tuber_call):
+    """Every extension module the server loads leaves the GIL disabled."""
+    assert tuber_call(object="Runtime", method="gil_enabled") == Succeeded(False)
+
+
+# tuber_call's session keeps at most 10 connections (urllib3's default); more
+# concurrent requests would still work, but discard connections with a warning.
+MAX_PARALLEL_REQUESTS = 10
+
+
+def test_parallel_requests(tuber_call):
+    """Requests issued in parallel each get their own, correct result."""
+
+    def call(i):
+        return tuber_call(object="Wrapper", method="increment", args=[[i] * 100])
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_PARALLEL_REQUESTS) as pool:
+        results = list(pool.map(call, range(200)))
+
+    assert results == [Succeeded([i + 1] * 100) for i in range(200)]
+
+
+def test_cpp_lock_under_concurrency(tuber_call):
+    """Concurrent calls into C++ that updates shared state under a lock lose no
+    updates. Wrapper.count() releases the GIL, so the calls overlap in C++
+    whether or not the server is free-threaded."""
+    calls, steps = 64, 1000
+
+    assert tuber_call(object="Wrapper", method="reset_counter") == Succeeded()
+
+    def call(_):
+        return tuber_call(object="Wrapper", method="count", args=[steps])
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_PARALLEL_REQUESTS) as pool:
+        results = list(pool.map(call, range(calls)))
+
+    assert results == [Succeeded()] * calls
+    assert tuber_call(object="Wrapper", method="counter") == Succeeded(calls * steps)
+
+    # Otherwise the lock was never contended, and the test proves nothing
+    assert tuber_call(object="Wrapper", method="max_in_flight")["result"] > 1
+
+
+def test_overlapping_request_warnings(tuber_call):
+    """Each request gets its own warnings back, even when overlapping requests
+    finish in a different order than they started."""
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        # A starts first and finishes first; B warns after A has finished
+        a = pool.submit(tuber_call, object="SlowObject", method="sleep", args=[0.2])
+        time.sleep(0.1)
+        b = pool.submit(tuber_call, object="Warnings", method="delayed_warning", args=["B's warning", 0.3])
+
+        assert a.result() == Succeeded(0.2)
+        assert b.result() == Succeeded(True, warnings=["B's warning"])
+
+    # and a request made afterwards still reports its own warnings
+    assert tuber_call(object="Warnings", method="delayed_warning", args=["C's warning"]) == Succeeded(
+        True, warnings=["C's warning"]
+    )
+
+
+def test_repeated_request_warnings(tuber_call):
+    """A warning raised again from the same place is reported by each request."""
+    for _ in range(3):
+        assert tuber_call(object="Warnings", method="delayed_warning", args=["Repeated"]) == Succeeded(
+            True, warnings=["Repeated"]
+        )
 
 
 def test_unserializable(tuber_call):
@@ -829,6 +915,101 @@ def test_tuberpy_simple_context_timeout(accept_types, tuberd_host):
         assert r1.result() == 0.1
 
 
+def test_tuberpy_simple_warnings_after_timeout(accept_types, tuberd_host):
+    """Warnings still reach the caller when the response arrives after a timed-out
+    wait, and the batch is resolved in the background."""
+    s = resolve_simple(tuberd_host, accept_types=accept_types)
+
+    with pytest.warns(match="This is a warning"):
+        with s.tuber_context() as ctx:
+            r1 = ctx.Warnings.single_warning("This is a warning")
+            r2 = ctx.SlowObject.sleep(0.5)
+            with pytest.raises(concurrent.futures.TimeoutError):
+                r2.result(timeout=0.1)
+
+            assert r1.result() is True
+
+
+@pytest.mark.asyncio
+async def test_tuberpy_async_warnings_after_timeout(accept_types, tuberd_host):
+    """Warnings reach the awaiting task when the batch was flushed in a
+    background task (here, by a timed-out wait on another call)."""
+    s = await tuber.resolve(tuberd_host, accept_types=accept_types)
+
+    async with s.tuber_context() as ctx:
+        r1 = ctx.Warnings.single_warning("This is a warning")
+        r2 = ctx.SlowObject.sleep(0.5)
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(r2, timeout=0.1)
+
+        with pytest.warns(match="This is a warning"):
+            assert (await r1) is True
+
+
+def test_tuberpy_simple_warnings_emitted_once(accept_types, tuberd_host):
+    """A response's warnings are emitted once, however often it's collected."""
+    s = resolve_simple(tuberd_host, accept_types=accept_types)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        with s.tuber_context() as ctx:
+            ctx.Warnings.single_warning("This is a warning")
+            response = ctx.send()
+            assert ctx.receive(response)[0] is True
+            assert ctx.receive(response)[0] is True
+
+    assert [str(w.message) for w in caught] == ["This is a warning"]
+
+
+def test_tuberpy_simple_warnings_per_call(accept_types, tuberd_host):
+    """A call's warnings are emitted when its own result is retrieved."""
+    s = resolve_simple(tuberd_host, accept_types=accept_types)
+
+    with s.tuber_context() as ctx:
+        r1 = ctx.Warnings.single_warning("First warning")
+        r2 = ctx.Warnings.single_warning("Second warning")
+
+        with warnings.catch_warnings(record=True) as first:
+            warnings.simplefilter("always")
+            assert r1.result() is True
+        with warnings.catch_warnings(record=True) as second:
+            warnings.simplefilter("always")
+            assert r2.result() is True
+
+    assert [str(w.message) for w in first] == ["First warning"]
+    assert [str(w.message) for w in second] == ["Second warning"]
+
+
+@pytest.mark.asyncio
+async def test_tuberpy_async_warnings_per_call(accept_types, tuberd_host):
+    """A call's warnings are emitted when it's awaited."""
+    s = await tuber.resolve(tuberd_host, accept_types=accept_types)
+
+    async with s.tuber_context() as ctx:
+        r1 = ctx.Warnings.single_warning("First warning")
+        r2 = ctx.Warnings.single_warning("Second warning")
+
+        with warnings.catch_warnings(record=True) as first:
+            warnings.simplefilter("always")
+            assert (await r1) is True
+        with warnings.catch_warnings(record=True) as second:
+            warnings.simplefilter("always")
+            assert (await r2) is True
+
+    assert [str(w.message) for w in first] == ["First warning"]
+    assert [str(w.message) for w in second] == ["Second warning"]
+
+
+def test_tuberpy_simple_request_future_warnings(accept_types, tuberd_host):
+    """Retrieving the future that send() returns emits its calls' warnings."""
+    s = resolve_simple(tuberd_host, accept_types=accept_types)
+
+    with pytest.warns(match="This is a warning"):
+        with s.tuber_context() as ctx:
+            ctx.Warnings.single_warning("This is a warning")
+            assert ctx.send().result().tuber_results == [True]
+
+
 # RFC 5737 TEST-NET-1: routable but unreachable, reliably triggers connect timeouts.
 UNREACHABLE_HOST = "192.0.2.1:80"
 
@@ -935,6 +1116,132 @@ def test_tuberpy_simple_context_flush_connection_error(accept_types):
         r1 = ctx._add_call(object="Wrapper", method="increment", args=[[1, 2, 3]], kwargs={})
         with pytest.raises(requests.exceptions.ConnectionError):
             r1.result(timeout=10)
+
+
+@pytest.fixture(params=["status", "unknown-charset", "content-type"])
+def failing_host(request):
+    """A host whose every response is an error, of the parametrized kind: an
+    HTTP error status (with a body in a charset that has no codec, or not), or
+    an unexpected content type. Yields the host, the error the client is
+    expected to raise, and a pattern its message must match."""
+    import http.server
+    import threading
+
+    status, content_type, error, message = {
+        "status": (500, "text/plain; charset=utf-8", tuber.TuberRemoteError, "status 500: Something went wrong$"),
+        "unknown-charset": (500, "text/plain; charset=no-such-codec", tuber.TuberRemoteError, "status 500$"),
+        "content-type": (200, "text/html", tuber.TuberError, "content type: text/html$"),
+    }[request.param]
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            body = b"Something went wrong"
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"127.0.0.1:{server.server_address[1]}", error, message
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_tuberpy_simple_context_error_response(failing_host):
+    """A request that fails with an error from the server fails every call in
+    it with that error."""
+    host, error, message = failing_host
+    obj = tuber.client.SimpleTuberObject("Wrapper", hostname=host, accept_types=["application/json"])
+    obj._tuber_resolved = True
+
+    with obj.tuber_context() as ctx:
+        r1 = ctx._add_call(object="Wrapper", method="increment", args=[[1, 2, 3]], kwargs={})
+        r2 = ctx._add_call(object="Wrapper", method="increment", args=[[4, 5, 6]], kwargs={})
+        with pytest.raises(error, match=message):
+            r1.result(timeout=10)
+        with pytest.raises(error, match=message):
+            r2.result(timeout=10)
+
+
+@pytest.mark.asyncio
+async def test_tuberpy_async_context_error_response(failing_host):
+    """The async equivalent."""
+    host, error, message = failing_host
+    obj = tuber.TuberObject("Wrapper", hostname=host, accept_types=["application/json"])
+    obj._tuber_resolved = True
+
+    ctx = obj.tuber_context()
+    r1 = ctx._add_call(object="Wrapper", method="increment", args=[[1, 2, 3]], kwargs={})
+    r2 = ctx._add_call(object="Wrapper", method="increment", args=[[4, 5, 6]], kwargs={})
+    with pytest.raises(error, match=message):
+        await r1
+    with pytest.raises(error, match=message):
+        await asyncio.wait_for(r2, timeout=10)
+
+
+def test_tuberpy_simple_context_failed_request_siblings(accept_types):
+    """A request that fails in transit fails every call in it, not just the one
+    whose result triggered it: nothing else would resolve the others."""
+    # port 9 (discard) refuses connections
+    obj = tuber.client.SimpleTuberObject("Wrapper", hostname="127.0.0.1:9", accept_types=accept_types)
+    obj._tuber_resolved = True
+
+    with obj.tuber_context() as ctx:
+        r1 = ctx._add_call(object="Wrapper", method="increment", args=[[1, 2, 3]], kwargs={})
+        r2 = ctx._add_call(object="Wrapper", method="increment", args=[[4, 5, 6]], kwargs={})
+        with pytest.raises(requests.exceptions.ConnectionError):
+            r1.result(timeout=10)
+        with pytest.raises(requests.exceptions.ConnectionError):
+            r2.result(timeout=10)
+
+
+@pytest.mark.asyncio
+async def test_tuberpy_async_context_failed_request_siblings(accept_types):
+    """The async equivalent: awaiting a sibling of a call whose request failed
+    raises the request's error, rather than waiting forever."""
+    # port 9 (discard) refuses connections
+    obj = tuber.TuberObject("Wrapper", hostname="127.0.0.1:9", accept_types=accept_types)
+    obj._tuber_resolved = True
+
+    ctx = obj.tuber_context()
+    r1 = ctx._add_call(object="Wrapper", method="increment", args=[[1, 2, 3]], kwargs={})
+    r2 = ctx._add_call(object="Wrapper", method="increment", args=[[4, 5, 6]], kwargs={})
+    with pytest.raises(aiohttp.ClientConnectionError):
+        await r1
+    with pytest.raises(aiohttp.ClientConnectionError):
+        await asyncio.wait_for(r2, timeout=10)
+
+
+def test_tuberpy_simple_send_cancel(accept_types, tuberd_host):
+    """Cancelling a request before it's started cancels its calls' futures, which
+    would otherwise never be resolved."""
+    from requests_futures.sessions import FuturesSession
+
+    s = resolve_simple(tuberd_host, "SlowObject", accept_types)
+    # one request at a time, so that a second one waits in the queue
+    s._tuber_requests_session = FuturesSession(max_workers=1)
+
+    with s.tuber_context() as ctx:
+        ctx.sleep(0.3)
+        first = ctx.send()
+        r = ctx.sleep(0)
+        second = ctx.send()
+
+        assert second.cancel()
+        assert r.cancelled()
+        with pytest.raises(concurrent.futures.CancelledError):
+            r.result(timeout=5)
+
+        assert first.result().tuber_results == [0.3]
 
 
 def test_tuberpy_simple_close(accept_types, tuberd_host):

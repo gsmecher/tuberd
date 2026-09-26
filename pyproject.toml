@@ -1,7 +1,7 @@
 [build-system]
 requires = [
     "cmake>=3.12",
-    "pybind11",
+    "pybind11>=2.13",
     "setuptools>=61",
     "setuptools_scm[toml]>=6.3",
     "wheel",
@@ -48,3 +48,11 @@ test-command = [
     "pytest -sv {project}/tests/test.py --import-mode append",
     "pytest -sv {project}/tests/test.py --import-mode append --orjson",
 ]
+
+# Free-threaded builds: orjson has no free-threaded wheels yet, so install the
+# dev dependencies without it (and skip the orjson run).
+[[tool.cibuildwheel.overrides]]
+select = "cp3*t-*"
+test-extras = []
+test-requires = ["aiohttp", "cbor2", "jsonschema", "numpy", "pytest", "pytest-asyncio", "requests", "requests-futures"]
+test-command = "pytest -sv {project}/tests/test.py --import-mode append"
