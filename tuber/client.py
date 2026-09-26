@@ -457,25 +457,14 @@ class SimpleContext:
         if not self.calls:
             return
 
-        calls = []
-        futures = []
-        while self.calls:
-            c, f = self.calls.pop(0)
-
-            calls.append(c)
-            futures.append(f)
+        if return_exceptions is None:
+            return_exceptions = self.return_exceptions
+        calls, futures, headers = self._prepare_request(return_exceptions)
 
         # The requests session (connection pool) belongs to the object tree,
         # akin to the asyncio event loop for the async client; it persists
         # beyond the lifetime of the context.
         cs = self.obj._tuber_requests_session
-
-        # Declare the media types we want to allow getting back
-        headers = {"Accept": ", ".join(self.accept_types)}
-        if return_exceptions is None:
-            return_exceptions = self.return_exceptions
-        if return_exceptions:
-            headers["X-Tuber-Options"] = "continue-on-error"
 
         # Create a HTTP request to complete the call. The RequestFuture parses
         # the response (in the requests session's worker thread), and resolves
@@ -487,6 +476,57 @@ class SimpleContext:
             self._receive, futures=futures, convert_json=convert_json, return_exceptions=return_exceptions
         )
         return RequestFuture(cs.post(self.uri, **post_kwargs), futures, parse)
+
+    def _prepare_request(self, return_exceptions: bool):
+        """Take the queued calls, returning them, their futures, and the headers
+        for the request that sends them."""
+        calls = [c for c, _ in self.calls]
+        futures = [f for _, f in self.calls]
+        self.calls.clear()
+
+        # Declare the media types we want to allow getting back
+        headers = {"Accept": ", ".join(self.accept_types)}
+        if return_exceptions:
+            headers["X-Tuber-Options"] = "continue-on-error"
+
+        return calls, futures, headers
+
+    def _parse_response(
+        self,
+        raw: bytes,
+        *,
+        ok: bool,
+        status: int,
+        content_type: str,
+        charset: str | None,
+        futures: list,
+        convert_json: bool,
+        return_exceptions: bool,
+    ):
+        """Check and decode a response, and assign its results to the calls'
+        futures (see _parse_json), returning them.
+
+        The response is described by plain values, whichever HTTP library
+        received it. A response that isn't a valid one raises, leaving the
+        futures alone: callers fail them with the error.
+        """
+        if not ok:
+            try:
+                text = raw.decode(charset or "utf-8", errors="replace")
+            except LookupError:
+                # the charset names no codec we know
+                raise TuberRemoteError(f"Request failed with status {status}") from None
+            raise TuberRemoteError(f"Request failed with status {status}: {text}")
+
+        # Check that the resulting media type is one which can actually be handled;
+        # this is slightly more liberal than checking that it is really among those we declared
+        if content_type not in AcceptTypes:
+            raise TuberError(f"Unexpected response content type: {content_type}")
+
+        # charset comes from the Content-Type (None if absent; the codecs then
+        # assume UTF-8)
+        json_out = AcceptTypes[content_type](raw, charset, convert=convert_json)
+        return self._parse_json(json_out, futures, convert_json, return_exceptions)
 
     @staticmethod
     def _parse_json(json_out, futures: list, converted: bool, return_exceptions: bool):
@@ -618,23 +658,16 @@ class SimpleContext:
             return_exceptions = self.return_exceptions
 
         with response as resp:
-            raw_out = resp.content
-            if not resp.ok:
-                try:
-                    text = resp.text
-                except Exception:
-                    raise TuberRemoteError(f"Request failed with status {resp.status_code}")
-                raise TuberRemoteError(f"Request failed with status {resp.status_code}: {text}")
-            content_type = resp.headers["Content-Type"]
-            # Check that the resulting media type is one which can actually be handled;
-            # this is slightly more liberal than checking that it is really among those we declared
-            if content_type not in AcceptTypes:
-                raise TuberError(f"Unexpected response content type: {content_type}")
-            # resp.encoding comes from the Content-Type charset (None if absent;
-            # the codecs then assume UTF-8).
-            json_out = AcceptTypes[content_type](raw_out, resp.encoding, convert=convert_json)
-
-        response.tuber_results = self._parse_json(json_out, futures, convert_json, return_exceptions)
+            response.tuber_results = self._parse_response(
+                resp.content,
+                ok=resp.ok,
+                status=resp.status_code,
+                content_type=resp.headers["Content-Type"],
+                charset=resp.encoding,
+                futures=futures,
+                convert_json=convert_json,
+                return_exceptions=return_exceptions,
+            )
         return response.tuber_results
 
     def receive(self, response: "RequestFuture"):
@@ -763,13 +796,11 @@ class Context(SimpleContext):
         if not self.calls:
             return []
 
-        calls = []
-        futures = []
-        while self.calls:
-            c, f = self.calls.pop(0)
-
-            calls.append(c)
-            futures.append(f)
+        if convert_json is None:
+            convert_json = self.convert_json
+        if return_exceptions is None:
+            return_exceptions = self.return_exceptions
+        calls, futures, headers = self._prepare_request(return_exceptions)
 
         loop = asyncio.get_running_loop()
         # hide import for non-library package that may not be invoked
@@ -808,15 +839,6 @@ class Context(SimpleContext):
 
         cs = loop._tuber_aiohttp_session
 
-        if convert_json is None:
-            convert_json = self.convert_json
-        if return_exceptions is None:
-            return_exceptions = self.return_exceptions
-
-        # Declare the media types we want to allow getting back
-        headers = {"Accept": ", ".join(self.accept_types)}
-        if return_exceptions:
-            headers["X-Tuber-Options"] = "continue-on-error"
         # Create a HTTP request to complete the call. This is a coroutine,
         # so we queue the call and then suspend execution (via 'yield')
         # until it's complete.
@@ -836,21 +858,16 @@ class Context(SimpleContext):
         # unresolved: resolve them here instead.
         try:
             async with cs.post(self.uri, **post_kwargs) as resp:
-                raw_out = await resp.read()
-                if not resp.ok:
-                    try:
-                        text = raw_out.decode(resp.charset or "utf-8")
-                    except Exception as ex:
-                        raise TuberRemoteError(f"Request failed with status {resp.status}")
-                    raise TuberRemoteError(f"Request failed with status {resp.status}: {text}")
-                content_type = resp.content_type
-                # Check that the resulting media type is one which can actually be handled;
-                # this is slightly more liberal than checking that it is really among those we declared
-                if content_type not in AcceptTypes:
-                    raise TuberError("Unexpected response content type: " + content_type)
-                json_out = AcceptTypes[content_type](raw_out, resp.charset, convert=convert_json)
-
-            return self._parse_json(json_out, futures, convert_json, return_exceptions)
+                return self._parse_response(
+                    await resp.read(),
+                    ok=resp.ok,
+                    status=resp.status,
+                    content_type=resp.content_type,
+                    charset=resp.charset,
+                    futures=futures,
+                    convert_json=convert_json,
+                    return_exceptions=return_exceptions,
+                )
 
         except asyncio.CancelledError:
             for f in futures:

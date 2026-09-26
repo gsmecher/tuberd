@@ -969,17 +969,19 @@ def test_tuberpy_simple_context_flush_connection_error(accept_types):
             r1.result(timeout=10)
 
 
-@pytest.fixture(params=["status", "content-type"])
+@pytest.fixture(params=["status", "unknown-charset", "content-type"])
 def failing_host(request):
     """A host whose every response is an error, of the parametrized kind: an
-    HTTP error status, or an unexpected content type. Yields the host, and the
-    error the client is expected to raise."""
+    HTTP error status (with a body in a charset that has no codec, or not), or
+    an unexpected content type. Yields the host, the error the client is
+    expected to raise, and a pattern its message must match."""
     import http.server
     import threading
 
-    status, content_type, error = {
-        "status": (500, "text/plain", tuber.TuberRemoteError),
-        "content-type": (200, "text/html", tuber.TuberError),
+    status, content_type, error, message = {
+        "status": (500, "text/plain; charset=utf-8", tuber.TuberRemoteError, "status 500: Something went wrong$"),
+        "unknown-charset": (500, "text/plain; charset=no-such-codec", tuber.TuberRemoteError, "status 500$"),
+        "content-type": (200, "text/html", tuber.TuberError, "content type: text/html$"),
     }[request.param]
 
     class Handler(http.server.BaseHTTPRequestHandler):
@@ -999,7 +1001,7 @@ def failing_host(request):
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        yield f"127.0.0.1:{server.server_address[1]}", error
+        yield f"127.0.0.1:{server.server_address[1]}", error, message
     finally:
         server.shutdown()
         server.server_close()
@@ -1008,32 +1010,32 @@ def failing_host(request):
 def test_tuberpy_simple_context_error_response(failing_host):
     """A request that fails with an error from the server fails every call in
     it with that error."""
-    host, error = failing_host
+    host, error, message = failing_host
     obj = tuber.client.SimpleTuberObject("Wrapper", hostname=host, accept_types=["application/json"])
     obj._tuber_resolved = True
 
     with obj.tuber_context() as ctx:
         r1 = ctx._add_call(object="Wrapper", method="increment", args=[[1, 2, 3]], kwargs={})
         r2 = ctx._add_call(object="Wrapper", method="increment", args=[[4, 5, 6]], kwargs={})
-        with pytest.raises(error):
+        with pytest.raises(error, match=message):
             r1.result(timeout=10)
-        with pytest.raises(error):
+        with pytest.raises(error, match=message):
             r2.result(timeout=10)
 
 
 @pytest.mark.asyncio
 async def test_tuberpy_async_context_error_response(failing_host):
     """The async equivalent."""
-    host, error = failing_host
+    host, error, message = failing_host
     obj = tuber.TuberObject("Wrapper", hostname=host, accept_types=["application/json"])
     obj._tuber_resolved = True
 
     ctx = obj.tuber_context()
     r1 = ctx._add_call(object="Wrapper", method="increment", args=[[1, 2, 3]], kwargs={})
     r2 = ctx._add_call(object="Wrapper", method="increment", args=[[4, 5, 6]], kwargs={})
-    with pytest.raises(error):
+    with pytest.raises(error, match=message):
         await r1
-    with pytest.raises(error):
+    with pytest.raises(error, match=message):
         await asyncio.wait_for(r2, timeout=10)
 
 
