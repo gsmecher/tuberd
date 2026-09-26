@@ -34,6 +34,23 @@ v0.18.6
 - The synchronous client no longer runs charset detection over every response
   body, which made large responses take tens of seconds to receive.
 
+- Add dynamic properties: attributes listed in an object's
+  ``__tuber_dynamic__`` (plain attributes or Python ``@property`` attributes)
+  are read from the server on every client access rather than cached at
+  resolve time. They are also the only properties clients may set. Assigning
+  one on a simple client sets it on the server; async clients use
+  ``await obj.tuber_set(name, value)``. Assigning a static property on a
+  client object now raises ``AttributeError``, rather than silently setting a
+  local attribute. Objects gain ``tuber_get(name)`` and
+  ``tuber_set(name, value)``; on containers, both take an optional ``keys``
+  list and act on every item in one request, and ``tuber_set`` accepts
+  ``values=[...]`` in place of ``value`` to set one value per item. Contexts
+  gain both too, for batching property reads and writes with method calls.
+
+- Dict-valued static properties are converted to ``TuberResult`` objects
+  when ``convert_json`` is left unset, matching method results. Previously
+  they were only converted if ``convert_json=True`` was passed explicitly.
+
 v0.18.5
 =======
 
