@@ -41,6 +41,17 @@ v0.18.6
   Warning filters a registry method changes are no longer reverted when it
   returns.
 
+- A request that fails now fails every call in it with its error, in both
+  clients. Before, a request that failed in transit (e.g. by timing out, or
+  with the connection refused) left all but the call whose result triggered
+  it pending forever; and one that failed with an error from the server (an
+  HTTP error status, or an unexpected content type) cancelled its calls,
+  whose futures then raised CancelledError instead. Likewise, cancelling the
+  future returned by a simple context's send() before the request starts
+  cancels its calls' futures. send() now returns a RequestFuture, a
+  concurrent.futures.Future whose result is the requests.Response, as
+  before.
+
 v0.18.5
 =======
 

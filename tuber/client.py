@@ -262,10 +262,10 @@ class SimpleContextFuture(concurrent.futures.Future):
 
         response = self._context.send()
 
-        # A request that fails in transit (e.g. timeout) never reaches the
-        # response hook, so it resolves none of the per-call futures. Collect
-        # the request future here so such an error is raised to the caller
-        # rather than blocking on an unresolvable future.
+        # Collect the request future here, so that an error from anywhere in
+        # the batch is raised by the call that sent it, as with the async
+        # client. (A failed request also fails every call's future: see
+        # RequestFuture.)
         if response is not None:
             response.result(timeout=timeout)
 
@@ -276,6 +276,67 @@ class SimpleContextFuture(concurrent.futures.Future):
     def exception(self, timeout=None):
         self._flush(timeout=timeout)
         return super().exception(timeout=timeout)
+
+
+class RequestFuture(concurrent.futures.Future):
+    """The future for one request, as returned by ``SimpleContext.send()``.
+
+    Its result is the ``requests.Response``, with the calls' results as its
+    ``.tuber_results``. It resolves the calls' futures too: from the response,
+    once parsed; with the request's error, if it fails (in transit, e.g. by
+    timing out, or because the server returned an error); or by cancelling
+    them, if it's cancelled before it starts.
+    """
+
+    def __init__(
+        self,
+        request: concurrent.futures.Future,
+        futures: list[SimpleContextFuture],
+        parse: callable,
+    ):
+        super().__init__()
+        self._request = request
+        self._futures = futures
+        self._parse = parse
+        request.add_done_callback(self._mirror)
+
+    def _mirror(self, request):
+        # The request keeps this callback (so a reference to this future)
+        # after it completes; drop our references back, rather than leave a
+        # cycle holding the whole client until the next garbage collection.
+        parse, self._parse, self._request = self._parse, None, None
+
+        if request.cancelled():
+            # the calls never ran, so nothing else will resolve their futures
+            for f in self._futures:
+                f.cancel()
+            super().cancel()
+            return
+
+        try:
+            # parsing sets the response's .tuber_results, and resolves the
+            # calls' futures (or cancels them, if the server returned an error)
+            response = request.result()
+            parse(response)
+        except Exception as e:
+            # A failed request (in transit, or with an error from the server)
+            # leaves the calls' futures unresolved: fail them with its error.
+            for f in self._futures:
+                try:
+                    if not f.done():
+                        f.set_exception(e)
+                except concurrent.futures.InvalidStateError:
+                    # cancelled by the caller in the meantime
+                    pass
+            self.set_exception(e)
+        else:
+            self.set_result(response)
+
+    def cancel(self):
+        # cancelling the request cancels this future, and its calls' futures,
+        # too (see _mirror)
+        request = self._request
+        return request is not None and request.cancel()
 
 
 class SimpleContext:
@@ -387,7 +448,7 @@ class SimpleContext:
 
         Returns
         -------
-        response : SimpleContextFuture
+        response : RequestFuture
             Future object corresponding to the server request.  Use ``receive()`` to
             retrieve the result from the server.
         """
@@ -416,17 +477,16 @@ class SimpleContext:
         if return_exceptions:
             headers["X-Tuber-Options"] = "continue-on-error"
 
-        # Hook function for parsing the response from the server
-        def hook(r, *args, **kwargs):
-            self._receive(r, futures, convert_json, return_exceptions)
-            return r
-
-        # Create a HTTP request to complete the call.
-        # Returns a Future whose result has been processed by the response hook.
-        post_kwargs = dict(json=calls, headers=headers, hooks={"response": hook})
+        # Create a HTTP request to complete the call. The RequestFuture parses
+        # the response (in the requests session's worker thread), and resolves
+        # the calls' futures.
+        post_kwargs = dict(json=calls, headers=headers)
         if self.timeout is not None:
             post_kwargs["timeout"] = self.timeout
-        return cs.post(self.uri, **post_kwargs)
+        parse = functools.partial(
+            self._receive, futures=futures, convert_json=convert_json, return_exceptions=return_exceptions
+        )
+        return RequestFuture(cs.post(self.uri, **post_kwargs), futures, parse)
 
     @staticmethod
     def _parse_json(json_out, futures: list, converted: bool, return_exceptions: bool):
@@ -475,9 +535,7 @@ class SimpleContext:
             # through. (See test_tuberpy_async_context_with_unserializable.)
             # We made an array request, and received an object response
             # because of an exception-catching scope in the server. Do the
-            # best we can.
-            for f in futures:
-                f.cancel()
+            # best we can: fail the request, which fails its calls too.
             raise TuberRemoteError(getkey(json_out, "error", "message"))
 
         for f, r in zip(futures, json_out):
@@ -562,9 +620,6 @@ class SimpleContext:
         with response as resp:
             raw_out = resp.content
             if not resp.ok:
-                # cancel any pending futures
-                for f in futures:
-                    f.cancel()
                 try:
                     text = resp.text
                 except Exception:
@@ -574,9 +629,6 @@ class SimpleContext:
             # Check that the resulting media type is one which can actually be handled;
             # this is slightly more liberal than checking that it is really among those we declared
             if content_type not in AcceptTypes:
-                # cancel any pending futures
-                for f in futures:
-                    f.cancel()
                 raise TuberError(f"Unexpected response content type: {content_type}")
             # resp.encoding comes from the Content-Type charset (None if absent;
             # the codecs then assume UTF-8).
@@ -585,7 +637,7 @@ class SimpleContext:
         response.tuber_results = self._parse_json(json_out, futures, convert_json, return_exceptions)
         return response.tuber_results
 
-    def receive(self, response: "SimpleContextFuture"):
+    def receive(self, response: "RequestFuture"):
         """Wait for a response from a previously sent HTTP request.
 
         Arguments
@@ -779,28 +831,40 @@ class Context(SimpleContext):
                 if self.timeout[1] is not None:
                     opts["total"] = self.timeout[1]
             post_kwargs["timeout"] = aiohttp.ClientTimeout(**opts)
-        async with cs.post(self.uri, **post_kwargs) as resp:
-            raw_out = await resp.read()
-            if not resp.ok:
-                # cancel any pending futures
-                for f in futures:
-                    f.cancel()
-                try:
-                    text = raw_out.decode(resp.charset or "utf-8")
-                except Exception as ex:
-                    raise TuberRemoteError(f"Request failed with status {resp.status}")
-                raise TuberRemoteError(f"Request failed with status {resp.status}: {text}")
-            content_type = resp.content_type
-            # Check that the resulting media type is one which can actually be handled;
-            # this is slightly more liberal than checking that it is really among those we declared
-            if content_type not in AcceptTypes:
-                # cancel any pending futures
-                for f in futures:
-                    f.cancel()
-                raise TuberError("Unexpected response content type: " + content_type)
-            json_out = AcceptTypes[content_type](raw_out, resp.charset, convert=convert_json)
+        # A request that fails - in transit, with an error from the server, or
+        # one in its response - or is cancelled, leaves the calls' futures
+        # unresolved: resolve them here instead.
+        try:
+            async with cs.post(self.uri, **post_kwargs) as resp:
+                raw_out = await resp.read()
+                if not resp.ok:
+                    try:
+                        text = raw_out.decode(resp.charset or "utf-8")
+                    except Exception as ex:
+                        raise TuberRemoteError(f"Request failed with status {resp.status}")
+                    raise TuberRemoteError(f"Request failed with status {resp.status}: {text}")
+                content_type = resp.content_type
+                # Check that the resulting media type is one which can actually be handled;
+                # this is slightly more liberal than checking that it is really among those we declared
+                if content_type not in AcceptTypes:
+                    raise TuberError("Unexpected response content type: " + content_type)
+                json_out = AcceptTypes[content_type](raw_out, resp.charset, convert=convert_json)
 
-        return self._parse_json(json_out, futures, convert_json, return_exceptions)
+            return self._parse_json(json_out, futures, convert_json, return_exceptions)
+
+        except asyncio.CancelledError:
+            for f in futures:
+                f.cancel()
+            raise
+        except Exception as e:
+            for f in futures:
+                if not f.done():
+                    f.set_exception(e)
+                    # The error is raised to whoever sent the request, so don't
+                    # have asyncio also report it as never retrieved for calls
+                    # that aren't awaited one by one.
+                    f.exception()
+            raise
 
 
 class SimpleTuberObject:
