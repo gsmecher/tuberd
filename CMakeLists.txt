@@ -43,7 +43,13 @@ if(BUILD_TESTING)
 		WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 		COMMAND python3 -m pytest tuber --doctest-modules)
 
-	set_tests_properties(test-native-json test-orjson-fastpath
+	# The example scripts double as documentation; run them against a server
+	# built from the example registry so they can't drift from the API.
+	add_test(NAME test-example
+		WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+		COMMAND python3 -m pytest -v tests/test_example.py)
+
+	set_tests_properties(test-native-json test-orjson-fastpath test-example
 		PROPERTIES ENVIRONMENT "CMAKE_TEST=1;PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}")
 endif(BUILD_TESTING)
 

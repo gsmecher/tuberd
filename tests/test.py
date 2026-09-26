@@ -124,6 +124,14 @@ class SlowObject:
         return seconds
 
 
+# This module doubles as the registry file served by the tuberd fixture
+# (see conftest.py), so that network-exported code and locally-run code are
+# one and the same.
+@pytest.fixture(scope="module")
+def registry_file():
+    return __file__
+
+
 registry = {
     "NullObject": NullObject(),
     "ObjectWithMethod": ObjectWithMethod(),
