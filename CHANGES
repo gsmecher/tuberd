@@ -52,6 +52,11 @@ v0.18.6
   concurrent.futures.Future whose result is the requests.Response, as
   before.
 
+- Both clients now report an error response from the server with the same
+  message, decoding its body as UTF-8 unless the response names a charset
+  (the synchronous client no longer uses charset detection here either), and
+  keeping undecodable bytes as replacement characters.
+
 v0.18.5
 =======
 
