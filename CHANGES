@@ -34,6 +34,13 @@ v0.18.6
 - The synchronous client no longer runs charset detection over every response
   body, which made large responses take tens of seconds to receive.
 
+- The server no longer loses a request's warnings when an overlapping request
+  finishes first. Warnings were collected with warnings.catch_warnings(),
+  whose process-wide save and restore breaks when requests finish out of
+  order; a single hook now hands each warning to the request that raised it.
+  Warning filters a registry method changes are no longer reverted when it
+  returns.
+
 v0.18.5
 =======
 
