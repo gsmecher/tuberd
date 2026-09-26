@@ -100,10 +100,24 @@ def resolve_method(method, bound=True):
     return out
 
 
-def check_attribute(obj, d):
+def resolve_property(obj, name):
+    """
+    Return a description of a dynamic property, without evaluating it.  A
+    Python @property is described by its docstring.
+    """
+    prop = getattr(type(obj), name, None)
+    doc = inspect.getdoc(prop) if isinstance(prop, property) else None
+    return dict(__doc__=doc) if doc else {}
+
+
+def check_attribute(obj, d, dynamic=False):
     """
     Return True if the given attribute is safe to resolve, False otherwise.
+    If dynamic is True, also require it to be a dynamic property (listed in
+    ``__tuber_dynamic__``), as clients may only set those.
     """
+    if dynamic and d not in getattr(obj, "__tuber_dynamic__", ()):
+        return False
     if d.startswith("__"):
         return False
     if d.startswith("_pybind11"):
@@ -125,24 +139,41 @@ def resolve_object(obj, recursive=True):
 
     objects: TuberContainer objects that are to be further resolved
     methods: Callable attributes
-    properties: Static property attributes
+    properties: Static property attributes (cached on the client after resolve)
+    dynamic_properties: Dynamic property attributes (fetched/set on each client access)
     """
 
     if recursive:
         objects = {}
         methods = {}
         props = {}
+        dynamic_props = {}
     else:
         methods = []
         props = []
+        dynamic_props = []
 
-    out = dict(__doc__=inspect.getdoc(obj), methods=methods, properties=props)
+    out = dict(__doc__=inspect.getdoc(obj), methods=methods, properties=props, dynamic_properties=dynamic_props)
+
+    # Dynamic properties (plain attributes or Python @property attributes) are
+    # listed in __tuber_dynamic__, and are read from and written to the server
+    # on every client access.  Any other property is static.
+    tuber_dynamic = getattr(obj, "__tuber_dynamic__", ())
 
     for d in dir(obj):
         # Don't export dunder methods or attributes - this avoids exporting
         # Python internals on the server side to any client.
         if not check_attribute(obj, d):
             continue
+
+        # Dynamic properties are not evaluated while resolving
+        if d in tuber_dynamic:
+            if recursive:
+                dynamic_props[d] = resolve_property(obj, d)
+            else:
+                dynamic_props.append(d)
+            continue
+
         attr = getattr(obj, d)
         if recursive:
             if getattr(attr, "__tuber_object__", False):
@@ -638,6 +669,16 @@ class RequestHandler:
             return result_response(**obj_meta)
 
         if propertyname:
+            # Property setter: "value" key in request means set the attribute
+            # on the server.  Respond with the value as read back, which may
+            # differ from the request (e.g. if a property setter coerces it).
+            # Only exported dynamic properties are settable.
+            if "value" in request:
+                if not check_attribute(obj, propertyname, dynamic=True):
+                    raise AttributeError(f"'{propertyname}' is not a settable property")
+                setattr(obj, propertyname, request["value"])
+                return result_response(getattr(obj, propertyname))
+
             # Sanity check
             if not hasattr(obj, propertyname):
                 raise AttributeError(f"'{objname}' object has no attribute '{propertyname}'")

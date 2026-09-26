@@ -53,6 +53,32 @@ async def main(host):
     stats = await therm.read_stats(n=10)
     print(f"Stats (n={stats.n}): mean={stats.mean:.2f}, min={stats.min:.2f}, max={stats.max:.2f}")
 
+    # ── Dynamic properties ────────────────────────────────────────────────────
+    #
+    # Reading a dynamic property returns an awaitable, which fetches the
+    # current value from the server.  Static properties (label) need no await.
+
+    print("\n=== Dynamic properties ===")
+
+    print(f"Temperature: {await therm.temperature:.2f} °C")
+    print("Offset:", await therm.offset)
+
+    # Assignment can't be awaited, so async objects set dynamic properties
+    # with tuber_set(), which returns the value read back by the server.
+    print("Offset (tuber_set):", await therm.tuber_set("offset", 1.5))
+
+    try:
+        therm.offset = 0.5
+    except tuber.TuberStateError as e:
+        print("Assignment:", e)
+
+    async with therm.tuber_context() as ctx:
+        ctx.tuber_set("offset", 2.0)
+        ctx.tuber_get("temperature")
+        results = await ctx()
+    print(f"Batched: offset={results[0]}, temperature={results[1]:.2f} °C")
+    await therm.tuber_set("offset", 1.5)
+
     # ── Errors ────────────────────────────────────────────────────────────────
     #
     # Server-side exceptions are raised on the client as TuberRemoteError.
@@ -149,6 +175,7 @@ async def main(host):
     temps = await asyncio.gather(*(s.read_temperature() for s in sensors))
     print("Sensor temperatures:", [f"{t:.2f}" for t in temps])
     print("Calibrations:", await sensors.tuber_call("get_calibration"))
+    print("Offsets:", await sensors.tuber_get("offset"))
 
     # ── CBOR and numpy ────────────────────────────────────────────────────────
     #
