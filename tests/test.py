@@ -969,6 +969,130 @@ def test_tuberpy_simple_context_flush_connection_error(accept_types):
             r1.result(timeout=10)
 
 
+@pytest.fixture(params=["status", "content-type"])
+def failing_host(request):
+    """A host whose every response is an error, of the parametrized kind: an
+    HTTP error status, or an unexpected content type. Yields the host, and the
+    error the client is expected to raise."""
+    import http.server
+    import threading
+
+    status, content_type, error = {
+        "status": (500, "text/plain", tuber.TuberRemoteError),
+        "content-type": (200, "text/html", tuber.TuberError),
+    }[request.param]
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            body = b"Something went wrong"
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"127.0.0.1:{server.server_address[1]}", error
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_tuberpy_simple_context_error_response(failing_host):
+    """A request that fails with an error from the server fails every call in
+    it with that error."""
+    host, error = failing_host
+    obj = tuber.client.SimpleTuberObject("Wrapper", hostname=host, accept_types=["application/json"])
+    obj._tuber_resolved = True
+
+    with obj.tuber_context() as ctx:
+        r1 = ctx._add_call(object="Wrapper", method="increment", args=[[1, 2, 3]], kwargs={})
+        r2 = ctx._add_call(object="Wrapper", method="increment", args=[[4, 5, 6]], kwargs={})
+        with pytest.raises(error):
+            r1.result(timeout=10)
+        with pytest.raises(error):
+            r2.result(timeout=10)
+
+
+@pytest.mark.asyncio
+async def test_tuberpy_async_context_error_response(failing_host):
+    """The async equivalent."""
+    host, error = failing_host
+    obj = tuber.TuberObject("Wrapper", hostname=host, accept_types=["application/json"])
+    obj._tuber_resolved = True
+
+    ctx = obj.tuber_context()
+    r1 = ctx._add_call(object="Wrapper", method="increment", args=[[1, 2, 3]], kwargs={})
+    r2 = ctx._add_call(object="Wrapper", method="increment", args=[[4, 5, 6]], kwargs={})
+    with pytest.raises(error):
+        await r1
+    with pytest.raises(error):
+        await asyncio.wait_for(r2, timeout=10)
+
+
+def test_tuberpy_simple_context_failed_request_siblings(accept_types):
+    """A request that fails in transit fails every call in it, not just the one
+    whose result triggered it: nothing else would resolve the others."""
+    # port 9 (discard) refuses connections
+    obj = tuber.client.SimpleTuberObject("Wrapper", hostname="127.0.0.1:9", accept_types=accept_types)
+    obj._tuber_resolved = True
+
+    with obj.tuber_context() as ctx:
+        r1 = ctx._add_call(object="Wrapper", method="increment", args=[[1, 2, 3]], kwargs={})
+        r2 = ctx._add_call(object="Wrapper", method="increment", args=[[4, 5, 6]], kwargs={})
+        with pytest.raises(requests.exceptions.ConnectionError):
+            r1.result(timeout=10)
+        with pytest.raises(requests.exceptions.ConnectionError):
+            r2.result(timeout=10)
+
+
+@pytest.mark.asyncio
+async def test_tuberpy_async_context_failed_request_siblings(accept_types):
+    """The async equivalent: awaiting a sibling of a call whose request failed
+    raises the request's error, rather than waiting forever."""
+    # port 9 (discard) refuses connections
+    obj = tuber.TuberObject("Wrapper", hostname="127.0.0.1:9", accept_types=accept_types)
+    obj._tuber_resolved = True
+
+    ctx = obj.tuber_context()
+    r1 = ctx._add_call(object="Wrapper", method="increment", args=[[1, 2, 3]], kwargs={})
+    r2 = ctx._add_call(object="Wrapper", method="increment", args=[[4, 5, 6]], kwargs={})
+    with pytest.raises(aiohttp.ClientConnectionError):
+        await r1
+    with pytest.raises(aiohttp.ClientConnectionError):
+        await asyncio.wait_for(r2, timeout=10)
+
+
+def test_tuberpy_simple_send_cancel(accept_types, tuberd_host):
+    """Cancelling a request before it's started cancels its calls' futures, which
+    would otherwise never be resolved."""
+    from requests_futures.sessions import FuturesSession
+
+    s = resolve_simple(tuberd_host, "SlowObject", accept_types)
+    # one request at a time, so that a second one waits in the queue
+    s._tuber_requests_session = FuturesSession(max_workers=1)
+
+    with s.tuber_context() as ctx:
+        ctx.sleep(0.3)
+        first = ctx.send()
+        r = ctx.sleep(0)
+        second = ctx.send()
+
+        assert second.cancel()
+        assert r.cancelled()
+        with pytest.raises(concurrent.futures.CancelledError):
+            r.result(timeout=5)
+
+        assert first.result().tuber_results == [0.3]
+
+
 def test_tuberpy_simple_close(accept_types, tuberd_host):
     """Closing an object closes the connection pool shared by its whole tree."""
     with tuber.resolve_simple(tuberd_host, accept_types=accept_types) as s:
