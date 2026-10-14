@@ -1296,8 +1296,16 @@ async def test_tuberpy_freed_without_gc(resolve, objname):
             assert (await tuber_result(r)) == [2, 3, 4]
             del ctx, r
 
+        # The simple client's worker thread still holds the last request (and,
+        # through its futures, the object) for a moment after it wakes the
+        # caller. Without a GIL the two threads race. Join it, so the worker
+        # has a chance to finish up and only this thread's references remain.
+        executor = getattr(s, "_tuber_requests_session", None) and s._tuber_requests_session.executor
+
         ref = weakref.ref(s)
         del s
+        if executor:
+            executor.shutdown(wait=True)
         assert ref() is None
     finally:
         gc.enable()
