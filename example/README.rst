@@ -42,14 +42,20 @@ real drivers:
 * ``__tuber_exclude__`` hides attributes that cannot or should not be sent
   over the network (e.g. hardware handles, serial ports).  Clients access
   that state through explicit methods instead.
+* ``__tuber_dynamic__`` lists dynamic properties (``Thermometer.offset``, a
+  plain attribute, and ``Thermometer.temperature``, a ``@property``).
+  Clients read them from the server on every access, and they are the only
+  properties clients can set.  Any other attribute, such as ``label``, is
+  static: clients cache its value when they connect.
 * Exceptions raised by a method (``DeviceDriver.set_knob`` rejects values
   outside 0–100) are sent back to the client, and warnings emitted by a
   method (``Thermometer.set_calibration`` warns about large offsets) are
   re-emitted on the client.
 * ``TuberArray`` exposes a list of identical objects (``sensors``) with a
   single shared description.  Because the description is shared, static
-  properties come from the first item; use ``TuberContainer`` for
-  heterogeneous items.
+  properties come from the first item; per-item state is read through
+  methods or dynamic properties.  Use ``TuberContainer`` for heterogeneous
+  items.
 * ``Thermometer.read_samples`` returns a numpy array, which clients can
   receive over CBOR.
 
@@ -92,6 +98,25 @@ includes the server-side traceback::
       driver.set_knob(500)
   except tuber.TuberRemoteError as e:
       print(e)
+
+**Dynamic properties** are read from the server on every access.  Assigning
+one sets it on the server, and ``tuber_set()`` does the same, returning the
+value read back by the server.  Static properties are read-only::
+
+  therm = client.thermometer
+  therm.temperature                 # read from the server
+  therm.offset = 0.5                # set on the server
+  therm.tuber_set("offset", 1.5)    # 1.5
+  therm.label = "renamed"           # AttributeError: label is static
+
+Inside a context, ``tuber_get()`` and ``tuber_set()`` batch property reads
+and writes with method calls::
+
+  with therm.tuber_context() as ctx:
+      ctx.tuber_set("offset", 2.0)
+      ctx.tuber_get("temperature")
+      ctx.get_calibration()
+      results = ctx()
 
 **Batching** multiple calls into a single HTTP request reduces round-trip
 overhead.  Open a context manager on any proxy object and queue calls inside
@@ -143,6 +168,14 @@ a single request::
   sensors.tuber_call("get_calibration")                  # [0.0, 0.1, 0.2, 0.3]
   sensors.tuber_call("read_temperature", keys=[0, 3])
 
+``tuber_get()`` and ``tuber_set()`` do the same for dynamic properties.
+``tuber_set()`` sets one value on every selected item, or one value per item
+with ``values``::
+
+  sensors.tuber_get("offset")                            # [0.0, 0.1, 0.2, 0.3]
+  sensors.tuber_set("offset", 0.5, keys=[1, 2])          # [0.5, 0.5]
+  sensors.tuber_set("offset", values=[0.0, 0.1, 0.2, 0.3])
+
   with client.tuber_context() as ctx:
       for i in range(len(sensors)):
           ctx.sensors[i].read_temperature()
@@ -171,6 +204,13 @@ coroutine.  It accepts the same options as ``resolve_simple()``::
 
   await driver.set_knob(42)
   state = await driver.get_all()
+
+Reading a dynamic property also returns an awaitable.  Assignment can't be
+awaited, so it raises ``tuber.TuberStateError``; use ``tuber_set()``
+instead::
+
+  temp = await therm.temperature
+  await therm.tuber_set("offset", 1.5)
 
 Async clients share one HTTP session per event loop, which is closed along
 with the loop (e.g. when ``asyncio.run()`` returns), so they need no
