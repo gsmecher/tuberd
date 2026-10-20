@@ -47,6 +47,7 @@ test-extras = ["dev"]
 test-command = [
     "pytest -sv {project}/tests/test.py --import-mode append",
     "pytest -sv {project}/tests/test.py --import-mode append --orjson",
+    "pytest -sv {project}/tests/test_client_only.py --import-mode append",
 ]
 
 # Free-threaded builds: orjson has no free-threaded wheels yet, so install the
@@ -55,4 +56,7 @@ test-command = [
 select = "cp3*t-*"
 test-extras = []
 test-requires = ["aiohttp", "cbor2", "jsonschema", "numpy", "pytest", "pytest-asyncio", "requests", "requests-futures"]
-test-command = "pytest -sv {project}/tests/test.py --import-mode append"
+test-command = [
+    "pytest -sv {project}/tests/test.py --import-mode append",
+    "pytest -sv {project}/tests/test_client_only.py --import-mode append",
+]
