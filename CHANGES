@@ -1,3 +1,11 @@
+v0.18.7
+=======
+
+- Fix async Clients when using v0.15 or earlier tuberd. This combination broke
+  in 4967c538, when the client-side HTTP connector was separated between the
+  async and sync clients, stranding the workaround for v0.15 and earlier for
+  "resolve=False" arguments to tuber_resolve.
+
 v0.18.6
 =======
 
