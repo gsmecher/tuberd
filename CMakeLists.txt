@@ -49,6 +49,11 @@ if(BUILD_TESTING)
 		WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
 		COMMAND python3 -m pytest -v tests/test_example.py)
 
+	# Client against canned responses: metadata shapes this server never sends.
+	add_test(NAME test-client-only
+		WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+		COMMAND python3 -m pytest -v tests/test_client_only.py)
+
 	set_tests_properties(test-native-json test-orjson-fastpath test-example
 		PROPERTIES ENVIRONMENT "CMAKE_TEST=1;PYTHONPATH=${CMAKE_BINARY_DIR}:${CMAKE_SOURCE_DIR}")
 endif(BUILD_TESTING)

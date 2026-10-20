@@ -719,7 +719,8 @@ class SimpleContext:
                 resp.content,
                 ok=resp.ok,
                 status=resp.status_code,
-                content_type=resp.headers["Content-Type"],
+                # parameters (e.g. a charset) are not part of the media type
+                content_type=resp.headers["Content-Type"].partition(";")[0].strip(),
                 charset=resp.encoding,
                 futures=futures,
                 convert_json=convert_json,
@@ -1144,6 +1145,17 @@ class SimpleTuberObject:
             meta = ctx()
             meta = meta[0]
 
+        # tuberd v0.15 and older did not understand resolve=True, and listed
+        # method and property names rather than describing them: ask it to
+        listed = [k for k in ("methods", "properties") if isinstance(meta.get(k), list)]
+        if names := [n for k in listed for n in meta[k]]:
+            with self.tuber_context(convert_json=False, return_exceptions=False) as ctx:
+                for name in names:
+                    ctx._add_call(object=self._tuber_objname, property=name)
+                described = dict(zip(names, ctx()))
+            for k in listed:
+                meta[k] = {n: described[n] for n in meta[k]}
+
         self._resolve_meta(meta)
 
     @staticmethod
@@ -1186,8 +1198,9 @@ class SimpleTuberObject:
         if self._tuber_meta is None:
             self._tuber_meta = {"objects": [], "methods": [], "properties": [], "container": False}
 
-        # object attributes
-        objects = meta.setdefault("objects", {})
+        # object attributes (a server may send null for any of these,
+        # so setdefault can't be used)
+        objects = meta["objects"] = meta.get("objects") or {}
         # remove any objects that are no longer on the remote
         for k in set(self._tuber_meta["objects"]) - set(objects):
             delattr(self, k)
@@ -1195,27 +1208,12 @@ class SimpleTuberObject:
             obj = self._resolve_object(attr=k, meta=v)
             setattr(self, k, obj)
 
-        # methods
-        methods = meta.setdefault("methods", {})
+        # methods (as above, setdefault can't be used)
+        methods = meta["methods"] = meta.get("methods") or {}
         # remove any methods that are no longer on the remote
         for k in set(self._tuber_meta["methods"]) - set(methods):
             del self._tuber_methods[k]
         if methods:
-            # backwards compatibility for v0.15 and older: when assembling
-            # metadata, older tuberd did not understand the "resolve=True"
-            # argument and returned a list of methods as metadata, rather than
-            # a dictionary that describes each one. Because this is a transient
-            # workaround for newer client / older server installs, it's more
-            # important that this code path is comprehensible than performant.
-            # To get the job done, we create a transient SimpleTuberObject
-            # rather than manage potentially async calls in what is normally a
-            # synchronous context.
-            if isinstance(methods, list):
-                with SimpleContext(self, convert_json=False, return_exceptions=False) as ctx:
-                    for m in methods:
-                        ctx._add_call(object=self._tuber_objname, property=m)
-                    methods = meta["methods"] = dict(zip(methods, ctx()))
-
             for k, v in methods.items():
                 if not callable(v):
                     v = self._resolve_method(k, v)
@@ -1225,18 +1223,11 @@ class SimpleTuberObject:
                 self._tuber_methods[k] = v
 
         # static properties
-        properties = meta.setdefault("properties", {})
+        properties = meta["properties"] = meta.get("properties") or {}
         # remove any properties that are no longer on the remote
         for k in set(self._tuber_meta["properties"]) - set(properties):
             delattr(self, k)
         if properties:
-            # same workaround as above
-            if isinstance(properties, list):
-                with SimpleContext(self, convert_json=False, return_exceptions=False) as ctx:
-                    for m in properties:
-                        ctx._add_call(object=self._tuber_objname, property=m)
-                    meta["properties"] = properties = dict(zip(properties, ctx()))
-
             # properties are really the only place where metadata is exported
             # directly into a user-visible object. If "convert_json" is True,
             # we need to ensure any dict-like properties are converted into
@@ -1336,6 +1327,17 @@ class TuberObject(SimpleTuberObject):
             ctx._add_call(object=self._tuber_objname, resolve=True)
             meta = await ctx()
             meta = meta[0]
+
+        # tuberd v0.15 and older did not understand resolve=True, and listed
+        # method and property names rather than describing them: ask it to
+        listed = [k for k in ("methods", "properties") if isinstance(meta.get(k), list)]
+        if names := [n for k in listed for n in meta[k]]:
+            async with self.tuber_context(convert_json=False, return_exceptions=False) as ctx:
+                for name in names:
+                    ctx._add_call(object=self._tuber_objname, property=name)
+                described = dict(zip(names, await ctx()))
+            for k in listed:
+                meta[k] = {n: described[n] for n in meta[k]}
 
         self._resolve_meta(meta)
 
