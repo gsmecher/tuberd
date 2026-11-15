@@ -33,7 +33,7 @@ static std::atomic<Server*> sigint_target = nullptr;
  */
 class Server {
 public:
-	Server(py::object handler, int port, py::object webroot, int max_age);
+	Server(py::object handler, std::string host, int port, py::object webroot, int max_age);
 	~Server();
 
 	int port() const { return port_; }
@@ -59,7 +59,7 @@ static void sigint(int signo) {
 		s->stop();
 }
 
-Server::Server(py::object handler, int port, py::object webroot, int max_age)
+Server::Server(py::object handler, std::string host, int port, py::object webroot, int max_age)
 	: svr_(std::make_unique<httplib::Server>())
 {
 	/* A single long-lived keep-alive connection with a single client is
@@ -214,11 +214,11 @@ Server::Server(py::object handler, int port, py::object webroot, int max_age)
 	 * so from here on the kernel queues connections for us: a client that
 	 * learns the port from port() can connect before serve() is called.
 	 * Port 0 asks the kernel for any free port. */
-	port_ = (port == 0) ? svr_->bind_to_any_port("0.0.0.0")
-	                    : (svr_->bind_to_port("0.0.0.0", port) ? port : -1);
+	port_ = (port == 0) ? svr_->bind_to_any_port(host)
+	                    : (svr_->bind_to_port(host, port) ? port : -1);
 
 	if (port_ < 0)
-		throw std::runtime_error("Tuber server could not bind to port " + std::to_string(port));
+		throw std::runtime_error("Tuber server could not bind to " + host + " port " + std::to_string(port));
 }
 
 Server::~Server()
@@ -290,7 +290,7 @@ PYBIND11_MODULE(_tuber_runtime, m) {
 	    "Constructing a Server binds its port; call serve() to handle requests\n"
 	    "until stop() is called (from another thread) or, when handling SIGINT,\n"
 	    "the process is interrupted. A stopped server cannot be restarted.\n")
-		.def(py::init<py::object, int, py::object, int>(),
+		.def(py::init<py::object, std::string, int, py::object, int>(),
 		    "Arguments\n---------\n"
 		    "handler : callable\n"
 		    "    Callable that takes an encoded request bytestring plus request headers,\n"
@@ -298,13 +298,17 @@ PYBIND11_MODULE(_tuber_runtime, m) {
 		    "    ``function(request: bytes, *, content_type: str, accept: str,\n"
 		    "    x_tuber_options: str) -> tuple[str, str]``\n"
 		    "    Absent headers are passed as empty strings.\n"
+		    "host : str\n"
+		    "    Local address to bind. The default, \"0.0.0.0\", listens on all IPv4\n"
+		    "    interfaces.\n"
 		    "port : int\n"
 		    "    Port to bind. Port 0 selects any free port; see the ``port`` attribute.\n"
 		    "webroot : str\n"
 		    "    Location to serve static content\n"
 		    "max_age : int\n"
 		    "    Maximum cache residency for static (file) assets\n",
-		    py::arg("handler"), py::arg("port")=80, py::arg("webroot")=py::none(), py::arg("max_age")=3600)
+		    py::arg("handler"), py::arg("host")="0.0.0.0", py::arg("port")=80, py::arg("webroot")=py::none(),
+		    py::arg("max_age")=3600)
 		.def_property_readonly("port", &Server::port,
 		    "The port this server is bound to.")
 		.def("serve", &Server::serve,
