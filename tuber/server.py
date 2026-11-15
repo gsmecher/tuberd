@@ -777,11 +777,32 @@ class Server:
         Maximum cache residency for static (file) assets
     validate : bool
         If True, validate incoming and outgoing data packets using jsonschema
+    keep_alive_timeout : int
+        Seconds an idle keep-alive connection is kept open before the server
+        closes it. Each idle connection occupies one of the server's worker
+        threads until then. Clients must stop reusing a connection sooner, or
+        a request can arrive just as the server closes the connection, and be
+        lost: their own ``keep_alive_timeout`` (an argument to
+        :func:`tuber.resolve_simple`, :func:`tuber.resolve` and the client
+        object classes; 4 s by default) must be shorter than this, by enough
+        to cover network and scheduling delays. The two are not negotiated;
+        configure them together.
     """
 
-    def __init__(self, registry, json_module="json", port=80, webroot=None, max_age=3600, validate=False):
+    def __init__(
+        self,
+        registry,
+        json_module="json",
+        port=80,
+        webroot=None,
+        max_age=3600,
+        validate=False,
+        keep_alive_timeout=5,
+    ):
         handler = RequestHandler(registry, json_module, validate=validate)
-        self._server = _runtime().Server(handler, port=port, webroot=webroot, max_age=max_age)
+        self._server = _runtime().Server(
+            handler, port=port, webroot=webroot, max_age=max_age, keep_alive_timeout=keep_alive_timeout
+        )
 
     @property
     def port(self):
@@ -886,6 +907,13 @@ def parse_args(argv=None, registry=None):
     )
     P.add_argument(
         "--validate", action="store_true", help="Validate incoming and outgoing data packets using jsonschema"
+    )
+    P.add_argument(
+        "--keep-alive-timeout",
+        default=5,
+        type=int,
+        help="Seconds an idle keep-alive connection is kept open (each occupies a worker thread until then); "
+        "clients' keep_alive_timeout must be shorter",
     )
     args = P.parse_args(argv)
 

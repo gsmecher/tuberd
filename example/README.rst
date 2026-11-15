@@ -85,6 +85,17 @@ This suits short-lived clients, such as one that returns plain Python dicts
   with tuber.resolve_simple("localhost:8080", convert_json=False) as client:
       state = client.driver.get_all()   # {"label": ..., "button": ..., "knob": ...}
 
+The server closes a connection that has been idle for its keep-alive timeout
+(5 s by default: ``--keep-alive-timeout``, or ``keep_alive_timeout`` for
+``tuber.server.Server``). A client stops reusing a connection sooner, once it
+has been idle for the client's own ``keep_alive_timeout`` (4 s by default), so
+that a request never arrives just as the server closes the connection. The
+two are not negotiated: if you change the server's timeout, give its clients a
+shorter one::
+
+  # server started with --keep-alive-timeout=30
+  client = tuber.resolve_simple("localhost:8080", keep_alive_timeout=25)
+
 Server-side exceptions are raised as ``tuber.TuberRemoteError``, whose message
 includes the server-side traceback::
 

@@ -10,6 +10,7 @@ import types
 import warnings
 import inspect
 import functools
+import time
 
 from . import TuberError, TuberStateError, TuberRemoteError
 from .codecs import AcceptTypes, Codecs, TuberResult
@@ -21,6 +22,12 @@ __all__ = [
     "resolve_simple",
 ]
 
+# Seconds a pooled connection may sit idle and still be reused. This must be
+# shorter than the servers' keep-alive timeout (tuber.server.Server's
+# keep_alive_timeout, 5 s by default): a request sent on a connection just as
+# the server closes it fails.
+DEFAULT_KEEP_ALIVE_TIMEOUT = 4.0
+
 
 async def resolve(
     hostname: str,
@@ -29,6 +36,7 @@ async def resolve(
     convert_json: bool | None = None,
     return_exceptions: bool | None = None,
     timeout: float | None = None,
+    keep_alive_timeout: float = DEFAULT_KEEP_ALIVE_TIMEOUT,
 ):
     """Create a local reference to a networked resource.
 
@@ -58,6 +66,14 @@ async def resolve(
         default may be overridden in the context construction.
         If a 2-tuple, the first value pertains to the initial connection time,
         and the second value pertains to the total transmission and response.
+    keep_alive_timeout : float
+        Seconds a pooled connection may sit idle and still be reused; a request
+        after a longer wait opens a new connection.  Must be shorter than the
+        server's keep_alive_timeout (5 s by default; see tuber.server.Server), by
+        enough to cover network and scheduling delays: a request sent on a
+        connection just as the server closes it fails.
+        On an event loop, objects share connections with objects that have the
+        same keep_alive_timeout.
 
     Returns
     -------
@@ -73,6 +89,7 @@ async def resolve(
         convert_json=convert_json,
         return_exceptions=return_exceptions,
         timeout=timeout,
+        keep_alive_timeout=keep_alive_timeout,
     )
     await instance.tuber_resolve()
     return instance
@@ -85,6 +102,7 @@ def resolve_simple(
     convert_json: bool | None = None,
     return_exceptions: bool | None = None,
     timeout: float | None = None,
+    keep_alive_timeout: float = DEFAULT_KEEP_ALIVE_TIMEOUT,
 ):
     """Create a local reference to a networked resource.
 
@@ -114,6 +132,12 @@ def resolve_simple(
         default may be overridden in the context construction.
         If a 2-tuple, the first value pertains to the initial connection time,
         and the second value pertains to the total transmission and response.
+    keep_alive_timeout : float
+        Seconds a pooled connection may sit idle and still be reused; a request
+        after a longer wait opens a new connection.  Must be shorter than the
+        server's keep_alive_timeout (5 s by default; see tuber.server.Server), by
+        enough to cover network and scheduling delays: a request sent on a
+        connection just as the server closes it fails.
 
     Returns
     -------
@@ -129,6 +153,7 @@ def resolve_simple(
         convert_json=convert_json,
         return_exceptions=return_exceptions,
         timeout=timeout,
+        keep_alive_timeout=keep_alive_timeout,
     )
     instance.tuber_resolve()
     return instance
@@ -882,8 +907,31 @@ class Context(SimpleContext):
         # hide import for non-library package that may not be invoked
         import aiohttp
 
-        if not hasattr(loop, "_tuber_aiohttp_session"):
+        # Monkey-patch tuber session memory handling with the running event
+        # loop: one session per keep-alive timeout, since aiohttp applies its
+        # keepalive_timeout to a whole connector.
+        if not hasattr(loop, "_tuber_aiohttp_sessions"):
+            loop._tuber_aiohttp_sessions = {}
 
+            # Ensure that ClientSession.close() is called when the loop is
+            # closed.  ClientSession.__del__ does not close the session, so it
+            # is not sufficient to simply attach the session to the loop to
+            # ensure garbage collection.
+            loop_close = loop.close
+
+            def close(self):
+                if hasattr(self, "_tuber_aiohttp_sessions"):
+                    if not self.is_closed():
+                        for session in self._tuber_aiohttp_sessions.values():
+                            self.run_until_complete(session.close())
+                    del self._tuber_aiohttp_sessions
+                loop_close()
+
+            loop.close = types.MethodType(close, loop)
+
+        keep_alive_timeout = self.obj._keep_alive_timeout
+        cs = loop._tuber_aiohttp_sessions.get(keep_alive_timeout)
+        if cs is None:
             # aiohttp.resolver.AsyncResolver does not support mDNS and is the
             # DefaultResolver. Instead, we try to force the use of an
             # MDNS-capable async resolver (if available) and use a threaded
@@ -893,27 +941,12 @@ class Context(SimpleContext):
             except ImportError:
                 Resolver = aiohttp.resolver.ThreadedResolver
 
-            # Monkey-patch tuber session memory handling with the running event loop
-            loop._tuber_aiohttp_session = aiohttp.ClientSession(
-                json_serialize=Codecs["json"].encode, connector=aiohttp.TCPConnector(resolver=Resolver())
+            # aiohttp reuses a pooled connection only if it has been idle for
+            # no longer than the connector's keepalive_timeout.
+            cs = loop._tuber_aiohttp_sessions[keep_alive_timeout] = aiohttp.ClientSession(
+                json_serialize=Codecs["json"].encode,
+                connector=aiohttp.TCPConnector(resolver=Resolver(), keepalive_timeout=keep_alive_timeout),
             )
-
-            # Ensure that ClientSession.close() is called when the loop is
-            # closed.  ClientSession.__del__ does not close the session, so it
-            # is not sufficient to simply attach the session to the loop to
-            # ensure garbage collection.
-            loop_close = loop.close
-
-            def close(self):
-                if hasattr(self, "_tuber_aiohttp_session"):
-                    if not self.is_closed():
-                        self.run_until_complete(self._tuber_aiohttp_session.close())
-                    del self._tuber_aiohttp_session
-                loop_close()
-
-            loop.close = types.MethodType(close, loop)
-
-        cs = loop._tuber_aiohttp_session
 
         # Create a HTTP request to complete the call. This is a coroutine,
         # so we queue the call and then suspend execution (via 'yield')
@@ -960,6 +993,61 @@ class Context(SimpleContext):
             raise
 
 
+@functools.lru_cache(maxsize=None)
+def requests_adapter_class(keep_alive_timeout: float):
+    """A requests adapter class whose connection pools do not reuse a
+    connection that has been idle for longer than keep_alive_timeout seconds.
+
+    The async client gets this from aiohttp (its connector's
+    keepalive_timeout); urllib3, under requests, has no such limit.
+    """
+    # hide imports for non-library package that may not be invoked
+    import requests.adapters
+    import urllib3
+
+    class IdleLimit:
+        # Each connection records when it went back into the pool. One idle
+        # for longer than keep_alive_timeout is closed when it is taken out
+        # again, and urllib3 reconnects it to send the request (as it does a
+        # connection it finds dropped).
+
+        def _put_conn(self, conn):
+            if conn is not None:
+                conn._tuber_idle_since = time.monotonic()
+            super()._put_conn(conn)
+
+        def _get_conn(self, timeout=None):
+            conn = super()._get_conn(timeout)
+            since = getattr(conn, "_tuber_idle_since", None)
+            if since is not None and time.monotonic() - since > keep_alive_timeout:
+                conn.close()
+            return conn
+
+    pool_classes = {
+        "http": type("HTTPConnectionPool", (IdleLimit, urllib3.HTTPConnectionPool), {}),
+        "https": type("HTTPSConnectionPool", (IdleLimit, urllib3.HTTPSConnectionPool), {}),
+    }
+
+    class KeepAliveAdapter(requests.adapters.HTTPAdapter):
+        def init_poolmanager(self, *args, **kwargs):
+            super().init_poolmanager(*args, **kwargs)
+            self.poolmanager.pool_classes_by_scheme = dict(pool_classes)
+
+    return KeepAliveAdapter
+
+
+def requests_session(keep_alive_timeout: float):
+    """The simple client's requests_futures session, whose connections are not
+    reused once idle for longer than keep_alive_timeout seconds."""
+    from requests_futures.sessions import FuturesSession
+
+    session = FuturesSession()
+    adapter = requests_adapter_class(float(keep_alive_timeout))
+    for prefix in ("http://", "https://"):
+        session.mount(prefix, adapter())
+    return session
+
+
 class SimpleTuberObject:
     """A base class for serial TuberObjects.
 
@@ -982,6 +1070,7 @@ class SimpleTuberObject:
         convert_json: bool | None = None,
         return_exceptions: bool | None = None,
         timeout: float | None = None,
+        keep_alive_timeout: float = DEFAULT_KEEP_ALIVE_TIMEOUT,
         parent: "SimpleTuberObject" | None = None,
     ):
         """
@@ -1010,6 +1099,13 @@ class SimpleTuberObject:
             This default may be overridden in the context construction.
             If a 2-tuple, the first value pertains to the initial connection time,
             and the second value pertains to the total transmission and response.
+        keep_alive_timeout : float
+            Seconds a pooled connection may sit idle and still be reused; a
+            request after a longer wait opens a new connection.  Must be shorter
+            than the server's keep_alive_timeout (5 s by default; see
+            tuber.server.Server), by enough to cover network and scheduling
+            delays: a request sent on a connection just as the server closes it
+            fails.
         parent: SimpleTuberObject
             If given, assume this object is an attribute of this parent object.
         """
@@ -1024,12 +1120,16 @@ class SimpleTuberObject:
             self._convert_json = convert_json
             self._return_exceptions = return_exceptions
             self._timeout = timeout
+            if keep_alive_timeout < 0:
+                raise ValueError("keep_alive_timeout must not be negative")
+            self._keep_alive_timeout = float(keep_alive_timeout)
         else:
             self._tuber_host = parent._tuber_host
             self._accept_types = parent._accept_types
             self._convert_json = parent._convert_json
             self._return_exceptions = parent._return_exceptions
             self._timeout = parent._timeout
+            self._keep_alive_timeout = parent._keep_alive_timeout
 
         # A root object owns a requests session (connection pool) for its
         # whole tree of attributes and container items, in the same way that
@@ -1038,9 +1138,7 @@ class SimpleTuberObject:
         # loop instead (see Context.__call__), so its objects carry none.
         if not issubclass(self._context_class, Context):
             if parent is None:
-                from requests_futures.sessions import FuturesSession
-
-                self._tuber_requests_session = FuturesSession()
+                self._tuber_requests_session = requests_session(self._keep_alive_timeout)
             else:
                 self._tuber_requests_session = parent._tuber_requests_session
 

@@ -1,3 +1,27 @@
+Unreleased
+==========
+
+- Clients no longer lose requests to the server's keep-alive timeout. The
+  server closes a connection that has been idle for its keep-alive timeout
+  (5 s), so a request sent on a pooled connection after about that long could
+  arrive as the server closed it, failing with ``RemoteDisconnected`` (simple
+  client) or ``ServerDisconnectedError`` (async client). Clients polling every
+  5 seconds hit this regularly. Both clients now stop reusing a connection
+  once it has been idle for their own keep-alive timeout, and connect afresh
+  instead. It is set with a new ``keep_alive_timeout`` argument to
+  ``resolve_simple()``, ``resolve()`` and the client object classes (4 s by
+  default), and must be shorter than the server's. In the async client,
+  objects on an event loop share connections with those that have the same
+  keep-alive timeout.
+
+- Add a ``keep_alive_timeout`` argument to ``tuber.server.Server`` (and
+  ``--keep-alive-timeout`` on the command line): the seconds an idle
+  keep-alive connection is kept open, 5 by default. Each idle connection
+  occupies one of the server's worker threads until it times out, so a longer
+  timeout ties up more of them. Server and client timeouts are not
+  negotiated: a deployment that changes the server's should give its clients
+  a shorter one.
+
 v0.18.7
 =======
 

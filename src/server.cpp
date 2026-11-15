@@ -3,6 +3,7 @@
 #include <filesystem>
 #include <limits>
 #include <memory>
+#include <stdexcept>
 #include <string>
 
 #include <httplib.h>
@@ -33,7 +34,7 @@ static std::atomic<Server*> sigint_target = nullptr;
  */
 class Server {
 public:
-	Server(py::object handler, int port, py::object webroot, int max_age);
+	Server(py::object handler, int port, py::object webroot, int max_age, int keep_alive_timeout);
 	~Server();
 
 	int port() const { return port_; }
@@ -59,13 +60,23 @@ static void sigint(int signo) {
 		s->stop();
 }
 
-Server::Server(py::object handler, int port, py::object webroot, int max_age)
+Server::Server(py::object handler, int port, py::object webroot, int max_age, int keep_alive_timeout)
 	: svr_(std::make_unique<httplib::Server>())
 {
 	/* A single long-lived keep-alive connection with a single client is
 	 * the expected "hot path": don't cap the number of requests it can
-	 * carry. The idle timeout is left at cpp-httplib's default (5s). */
+	 * carry.
+	 *
+	 * The idle timeout defaults to cpp-httplib's (5s). Each idle
+	 * connection occupies one of cpp-httplib's worker threads until it
+	 * times out, so a longer timeout ties up more of them. Clients must
+	 * stop reusing a connection sooner (their own keep_alive_timeout, 4s
+	 * by default), or a request can arrive just as the server closes the
+	 * connection, and be lost. */
+	if(keep_alive_timeout < 0)
+		throw std::invalid_argument("keep_alive_timeout must not be negative");
 	svr_->set_keep_alive_max_count(std::numeric_limits<size_t>::max());
+	svr_->set_keep_alive_timeout(keep_alive_timeout);
 	svr_->set_default_file_mimetype(MIME_DEFAULT);
 
 	/* It's Always TCP_NODELAY. Every damn time.
@@ -290,7 +301,7 @@ PYBIND11_MODULE(_tuber_runtime, m) {
 	    "Constructing a Server binds its port; call serve() to handle requests\n"
 	    "until stop() is called (from another thread) or, when handling SIGINT,\n"
 	    "the process is interrupted. A stopped server cannot be restarted.\n")
-		.def(py::init<py::object, int, py::object, int>(),
+		.def(py::init<py::object, int, py::object, int, int>(),
 		    "Arguments\n---------\n"
 		    "handler : callable\n"
 		    "    Callable that takes an encoded request bytestring plus request headers,\n"
@@ -303,8 +314,13 @@ PYBIND11_MODULE(_tuber_runtime, m) {
 		    "webroot : str\n"
 		    "    Location to serve static content\n"
 		    "max_age : int\n"
-		    "    Maximum cache residency for static (file) assets\n",
-		    py::arg("handler"), py::arg("port")=80, py::arg("webroot")=py::none(), py::arg("max_age")=3600)
+		    "    Maximum cache residency for static (file) assets\n"
+		    "keep_alive_timeout : int\n"
+		    "    Seconds an idle keep-alive connection is kept open. Each idle\n"
+		    "    connection occupies a worker thread until then. Clients must use a\n"
+		    "    shorter keep_alive_timeout of their own.\n",
+		    py::arg("handler"), py::arg("port")=80, py::arg("webroot")=py::none(), py::arg("max_age")=3600,
+		    py::arg("keep_alive_timeout")=5)
 		.def_property_readonly("port", &Server::port,
 		    "The port this server is bound to.")
 		.def("serve", &Server::serve,
