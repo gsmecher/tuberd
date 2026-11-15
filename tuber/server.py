@@ -769,6 +769,10 @@ class Server:
         Dictionary of user-defined objects with properties and methods.
     json_module : str
         Python package to use for encoding and decoding JSON requests.
+    host : str
+        Local address to bind. The default, ``"0.0.0.0"``, listens on all IPv4
+        interfaces. Binding a specific address lets several servers share a port
+        on different addresses of the same host.
     port : int
         Port to bind. Port 0 selects any free port.
     webroot : str
@@ -779,9 +783,11 @@ class Server:
         If True, validate incoming and outgoing data packets using jsonschema
     """
 
-    def __init__(self, registry, json_module="json", port=80, webroot=None, max_age=3600, validate=False):
+    def __init__(
+        self, registry, json_module="json", host="0.0.0.0", port=80, webroot=None, max_age=3600, validate=False
+    ):
         handler = RequestHandler(registry, json_module, validate=validate)
-        self._server = _runtime().Server(handler, port=port, webroot=webroot, max_age=max_age)
+        self._server = _runtime().Server(handler, host=host, port=port, webroot=webroot, max_age=max_age)
 
     @property
     def port(self):
@@ -875,6 +881,7 @@ def parse_args(argv=None, registry=None):
         dest="json_module",
         help="Python JSON module to use for serialization/deserialization",
     )
+    P.add_argument("-H", "--host", default="0.0.0.0", help="Local address to bind (default: all IPv4 interfaces)")
     P.add_argument("-p", "--port", default=80, type=int, help="Port (0 selects any free port)")
     P.add_argument("-w", "--webroot", help="Location to serve static content")
     P.add_argument(

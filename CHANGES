@@ -1,3 +1,11 @@
+Unreleased
+==========
+
+- Add a ``host`` argument to ``tuber.server.Server`` (and ``-H/--host`` on the
+  command line) to bind a specific local address instead of all IPv4
+  interfaces. Several servers can then share a port on different addresses of
+  one machine, e.g. one loopback address per simulated device.
+
 v0.18.7
 =======
 
