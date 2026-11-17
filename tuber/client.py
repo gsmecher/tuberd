@@ -1237,8 +1237,10 @@ class SimpleTuberObject:
                     return TuberResult(**{k: recurse(v) for k, v in obj.items()})
                 return obj
 
+            # (unset means True, as it does for contexts)
+            convert = self._convert_json is None or self._convert_json
             for k, v in properties.items():
-                setattr(self, k, recurse(v) if self._convert_json else v)
+                setattr(self, k, recurse(v) if convert else v)
 
         # Discard any container attributes from a previous resolve before
         # rebuilding: changes may have been structural (e.g. dict-like to
