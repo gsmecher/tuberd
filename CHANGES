@@ -1,6 +1,15 @@
 Unreleased
 ==========
 
+- Clients no longer lose requests to the server's keep-alive timeout. Since
+  v0.18.6, tuberd closes a connection that has been idle for 5 s
+  (cpp-httplib's default; libhttpserver's was 180 s), so a request sent on a
+  pooled connection after about that long could arrive as the server closed
+  it, failing with ``RemoteDisconnected`` (simple client) or
+  ``ServerDisconnectedError`` (async client). Clients polling every 5 seconds
+  hit this regularly. Both clients now stop reusing a connection once it has
+  been idle for 4 s, and connect afresh instead.
+
 - Add a ``host`` argument to ``tuber.server.Server`` (and ``-H/--host`` on the
   command line) to bind a specific local address instead of all IPv4
   interfaces. Several servers can then share a port on different addresses of

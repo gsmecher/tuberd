@@ -64,7 +64,12 @@ Server::Server(py::object handler, std::string host, int port, py::object webroo
 {
 	/* A single long-lived keep-alive connection with a single client is
 	 * the expected "hot path": don't cap the number of requests it can
-	 * carry. The idle timeout is left at cpp-httplib's default (5s). */
+	 * carry.
+	 *
+	 * The idle timeout is left at cpp-httplib's default (5s). Tuber clients
+	 * stop reusing a connection after 4s idle, so that a request never
+	 * arrives just as the server closes it (see requests_session() in
+	 * tuber/client.py): keep this longer than that. */
 	svr_->set_keep_alive_max_count(std::numeric_limits<size_t>::max());
 	svr_->set_default_file_mimetype(MIME_DEFAULT);
 

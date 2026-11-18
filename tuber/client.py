@@ -10,6 +10,7 @@ import types
 import warnings
 import inspect
 import functools
+import time
 
 from . import TuberError, TuberStateError, TuberRemoteError
 from .codecs import AcceptTypes, Codecs, TuberResult
@@ -893,9 +894,12 @@ class Context(SimpleContext):
             except ImportError:
                 Resolver = aiohttp.resolver.ThreadedResolver
 
-            # Monkey-patch tuber session memory handling with the running event loop
+            # Monkey-patch tuber session memory handling with the running event loop.
+            # The connector reuses a pooled connection only if it has been idle
+            # for no longer than keepalive_timeout: see requests_session().
             loop._tuber_aiohttp_session = aiohttp.ClientSession(
-                json_serialize=Codecs["json"].encode, connector=aiohttp.TCPConnector(resolver=Resolver())
+                json_serialize=Codecs["json"].encode,
+                connector=aiohttp.TCPConnector(resolver=Resolver(), keepalive_timeout=4.0),
             )
 
             # Ensure that ClientSession.close() is called when the loop is
@@ -958,6 +962,61 @@ class Context(SimpleContext):
                     # that aren't awaited one by one.
                     f.exception()
             raise
+
+
+@functools.cache
+def keep_alive_adapter():
+    """A requests adapter class whose connection pools do not reuse a
+    connection that has been idle for longer than 4 s (see requests_session)."""
+    # hide imports for non-library package that may not be invoked
+    import requests.adapters
+    import urllib3
+
+    class IdleLimitPool(urllib3.HTTPConnectionPool):
+        # Each connection records when it went back into the pool. One idle
+        # for too long is closed when it is taken out again, and urllib3
+        # reconnects it to send the request (as it does a connection it finds
+        # dropped).
+
+        def _put_conn(self, conn):
+            if conn is not None:
+                conn._tuber_idle_since = time.monotonic()
+            super()._put_conn(conn)
+
+        def _get_conn(self, timeout=None):
+            conn = super()._get_conn(timeout)
+            since = getattr(conn, "_tuber_idle_since", None)
+            if since is not None and time.monotonic() - since > 4.0:
+                conn.close()
+            return conn
+
+    class KeepAliveAdapter(requests.adapters.HTTPAdapter):
+        def init_poolmanager(self, *args, **kwargs):
+            super().init_poolmanager(*args, **kwargs)
+            self.poolmanager.pool_classes_by_scheme = {"http": IdleLimitPool}
+
+    return KeepAliveAdapter
+
+
+def requests_session():
+    """The simple client's requests_futures session, whose connections are not
+    reused once idle for longer than 4 s.
+
+    tuberd closes a keep-alive connection once it has been idle for 5 s
+    (cpp-httplib's default, advertised as "Keep-Alive: timeout=5"). A request
+    sent on a pooled connection just as the server closes it is lost, so both
+    clients stop reusing a connection a second sooner, and connect afresh
+    instead. The second covers network delay, and the gap between the server
+    starting its idle clock (once it has written a response) and the client
+    starting its own (once it has read it). The async client gets this from
+    aiohttp's connector (its keepalive_timeout); urllib3, under requests, has no
+    idle limit of its own.
+    """
+    from requests_futures.sessions import FuturesSession
+
+    session = FuturesSession()
+    session.mount("http://", keep_alive_adapter()())
+    return session
 
 
 class SimpleTuberObject:
@@ -1038,9 +1097,7 @@ class SimpleTuberObject:
         # loop instead (see Context.__call__), so its objects carry none.
         if not issubclass(self._context_class, Context):
             if parent is None:
-                from requests_futures.sessions import FuturesSession
-
-                self._tuber_requests_session = FuturesSession()
+                self._tuber_requests_session = requests_session()
             else:
                 self._tuber_requests_session = parent._tuber_requests_session
 
