@@ -5,6 +5,7 @@ import warnings
 
 from tuber import codecs
 from tuber import server as tuber_server
+from tuber.client import keep_alive_adapter
 
 pytest_plugins = ("pytest_asyncio",)
 
@@ -94,7 +95,10 @@ def tuber_call(request, tuberd_host):
     accept = f"application/{request.param}"
     loads = lambda d: codecs.AcceptTypes[accept](d, encoding="utf-8", convert=False)
 
+    # Like the clients, stop reusing a connection once it has been idle for
+    # 4 s: tuberd closes it at 5 s, and a request sent on it just then is lost.
     session = requests.Session()
+    session.mount("http://", keep_alive_adapter()())
 
     def tuber_call(json=None, **kwargs):
         # The most explicit call style passes POST content via an explicit
