@@ -1,5 +1,5 @@
-Unreleased
-==========
+v0.18.8
+=======
 
 - Clients no longer lose requests to the server's keep-alive timeout. Since
   v0.18.6, tuberd closes a connection that has been idle for 5 s
