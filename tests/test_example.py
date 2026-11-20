@@ -48,6 +48,9 @@ def test_example_client(tuberd, script):
     assert "Remote error: ValueError" in out
     assert "Calibrations: [0.0, 0.1, 0.2, 0.3]" in out
     assert "Samples: ndarray float64 (8,)" in out
+    # Dynamic properties, read across the array (after the sync client has
+    # set and restored them)
+    assert "Offsets: [0.0, 0.1, 0.2, 0.3]" in out
 
 
 def test_example_embedded():

@@ -86,6 +86,7 @@ metadata_object = {
     "properties": {
         "__doc__": {"type": ["string", "null"]},
         "properties": {"type": "object"},
+        "dynamic_properties": {"type": "object"},
         "methods": {
             "type": "object",
             "additionalProperties": metadata_method,
